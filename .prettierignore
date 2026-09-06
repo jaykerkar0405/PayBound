@@ -1,0 +1,11 @@
+dist
+build
+.svelte-kit
+node_modules
+coverage
+pnpm-lock.yaml
+
+# explicitly off-limits per project instructions
+README.md
+LICENSE
+docs/TASKS.md
