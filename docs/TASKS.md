@@ -46,9 +46,10 @@ an unambiguous contract to build against. Do these first and in this order.
       CAPABILITY_SPEC.md). Blocks 1.8 — the property tests can't be written
       correctly against undefined transition conditions for these two
       branches. *(Broker)*
-- [ ] **0.4** Define the Broker↔Agent-sandbox wire protocol: the single `pay(capability_id)`
+- [x] **0.4** Define the Broker↔Agent-sandbox wire protocol: the single `pay(capability_id)`
       call's request/response shape, error codes, and how the sandbox's attested
-      workload identity is presented on the channel. Depends on 0.3. *(Broker + Sandbox, joint)*
+      workload identity is presented on the channel. See `docs/PROTOCOL.md`.
+      Depends on 0.3. *(Broker + Sandbox, joint)*
 - [x] **0.5** Decide and document the tech stack per component (language/framework
       for broker service, agent sandbox runtime, resource registry storage,
       capability issuer). One short ADR-style note is enough. *(Broker)*
