@@ -1,5 +1,46 @@
 # Open Questions
 
+## Attestation mechanism for the Broker<->Sandbox channel handshake (blocks tasks 2.3, 1.7)
+
+**Status:** Unresolved. Blocking task 2.3 (establishing the sandbox's
+attested workload identity) and, indirectly, the full implementation of 1.7
+(the `pay()` endpoint) and 0.4's channel handshake.
+
+`docs/PROTOCOL.md` §5 specifies what the channel handshake needs to convey
+(identity, and freshness/non-replay of the attestation itself) but does not
+specify the concrete attestation mechanism, because none has actually been
+decided yet. Tech-stack discussions have mentioned a container ID plus a
+signed boot nonce as one possible approach, but that was discussed, not
+decided, and `docs/TECH_STACK_ADR.md` does not commit to it.
+
+**What needs to happen:** whoever picks up task 2.3 needs to decide, and
+then update `docs/PROTOCOL.md` §5 with the actual mechanism (not just the
+requirements it must satisfy) before or as part of implementing it:
+- What identity artifact the sandbox presents (container ID? a
+  provisioned key pair? something else?).
+- How freshness/non-replay of that artifact is established and checked by
+  the Broker (a signed nonce? a short-lived token? something else?).
+
+This question is intentionally left open here — no mechanism is assumed,
+only the requirements it must satisfy.
+
+## Resolved: AuthorizationFailureReason names now match SECURITY_INVARIANT.md's resolved clause names
+
+**Status:** Resolved.
+
+Previously: `packages/types`' `AuthorizationFailureReason` (and
+`authorizationFailureReasonSchema`) used 9 values named directly after each
+clause's own terms (`DESTINATION_MISMATCH`, `PAYMENT_REQUEST_HASH_MISMATCH`,
+`NONCE_CONSUMED`, `CAPABILITY_EXPIRED`), predating task 0.3.1a's resolution
+of the 7-vs-9 violation-type mapping.
+
+Decision: `packages/types` has been updated to use
+`SECURITY_INVARIANT.md`'s resolved clause names directly —
+`DESTINATION_MISMATCH` -> `SUBSTITUTION`, `PAYMENT_REQUEST_HASH_MISMATCH` ->
+`REQUEST_FORGERY`, `NONCE_CONSUMED` -> `REPLAY`, `CAPABILITY_EXPIRED` ->
+`STALE_NONCE` (the other 5 values were already correct). `docs/PROTOCOL.md`
+§4 has been updated to match.
+
 ## Ledger signing curve mismatch (blocks task 3.1)
 
 **Status:** Unresolved. Blocking.

@@ -1045,48 +1045,60 @@ function _assertAuthorizePaymentInputShape(
 /** Schema for the invariant-clause failure reason; see the `AuthorizationFailureReason` type below for the full doc. */
 export const authorizationFailureReasonSchema = z.enum([
   "AMOUNT_MISMATCH",
-  "DESTINATION_MISMATCH",
+  "SUBSTITUTION",
   "RESOURCE_MISMATCH",
   "TASK_HASH_MISMATCH",
   "SESSION_MISMATCH",
-  "PAYMENT_REQUEST_HASH_MISMATCH",
-  "NONCE_CONSUMED",
-  "CAPABILITY_EXPIRED",
+  "REQUEST_FORGERY",
+  "REPLAY",
+  "STALE_NONCE",
   "BUDGET_EXCEEDED",
 ]);
 
 /**
- * Which specific invariant clause failed, named directly after the clause's
- * own terms (e.g. `AMOUNT_MISMATCH` for the `payment.amount ==
- * capability.exact_amount` clause) rather than the seven named violation
- * types from the source spec (replay, substitution, escalation, stale
- * nonce, session mismatch, task_hash mismatch, over-budget).
+ * Which specific invariant clause failed. Named after
+ * `SECURITY_INVARIANT.md`'s resolved 9 clause names (task 0.3.1a) — these
+ * were previously named directly after each clause's own terms (e.g.
+ * `DESTINATION_MISMATCH`, `PAYMENT_REQUEST_HASH_MISMATCH`, `NONCE_CONSUMED`,
+ * `CAPABILITY_EXPIRED`) to sidestep the then-unresolved ambiguity between
+ * the spec's 7 named violation types and the invariant's 9 formal clauses
+ * (task 0.3.1, see docs/OPEN_QUESTIONS.md "Resolved: violation-type
+ * labeling in SECURITY_INVARIANT.md (task 0.3.1)"). Task 0.3.1a has since
+ * resolved that mapping, and this type now uses its final names directly.
  *
- * This sidesteps rather than resolves the ambiguity flagged in
- * docs/OPEN_QUESTIONS.md ("Violation-type labeling in SECURITY_INVARIANT.md
- * is an interpretation", task 0.3.1): naming failures after the clause they
- * violate is unambiguous, but two of these clause-level names
- * (`AMOUNT_MISMATCH`, `DESTINATION_MISMATCH`) may both ultimately be called
- * "substitution", and `CAPABILITY_EXPIRED` may or may not be what the source
- * means by "stale nonce" — that mapping is exactly what task 0.3.1 needs to
- * resolve. Do not rename these to the seven violation-type labels until
- * 0.3.1 is resolved.
+ * @see SECURITY_INVARIANT.md "1. Amount mismatch" — `payment.amount == capability.exact_amount`
+ * @see SECURITY_INVARIANT.md "2. Substitution" — `payment.destination == capability.recipient`
+ * @see SECURITY_INVARIANT.md "3. Resource mismatch" — `payment.resource == capability.resource_id`
+ * @see SECURITY_INVARIANT.md "4. Task_hash mismatch" — `payment.task_hash == capability.task_hash`
+ * @see SECURITY_INVARIANT.md "5. Session mismatch" — `payment.session == capability.session`
+ * @see SECURITY_INVARIANT.md "6. Request forgery" — `payment.payment_request_hash == capability.payment_request_hash`
+ * @see SECURITY_INVARIANT.md "7. Replay" — `capability.nonce is unconsumed`
+ * @see SECURITY_INVARIANT.md "8. Stale nonce" — `now < capability.expiry`
+ * @see SECURITY_INVARIANT.md "9. Over-budget" — `(task.spent_so_far + payment.amount) <= task.max_total_spend`
  *
  * Hand-written to preserve hover JSDoc; kept in sync with
  * `authorizationFailureReasonSchema` by
  * `_assertAuthorizationFailureReasonShape` below.
  * @see SECURITY_INVARIANT.md "Each clause, and what violating it means"
- * @see docs/OPEN_QUESTIONS.md "Violation-type labeling in SECURITY_INVARIANT.md is an interpretation"
  */
 export type AuthorizationFailureReason =
+  /** @see SECURITY_INVARIANT.md "1. Amount mismatch" — `payment.amount == capability.exact_amount` */
   | "AMOUNT_MISMATCH"
-  | "DESTINATION_MISMATCH"
+  /** @see SECURITY_INVARIANT.md "2. Substitution" — `payment.destination == capability.recipient` */
+  | "SUBSTITUTION"
+  /** @see SECURITY_INVARIANT.md "3. Resource mismatch" — `payment.resource == capability.resource_id` (distinct from escalation — see THREAT_MODEL.md) */
   | "RESOURCE_MISMATCH"
+  /** @see SECURITY_INVARIANT.md "4. Task_hash mismatch" — `payment.task_hash == capability.task_hash` */
   | "TASK_HASH_MISMATCH"
+  /** @see SECURITY_INVARIANT.md "5. Session mismatch" — `payment.session == capability.session` */
   | "SESSION_MISMATCH"
-  | "PAYMENT_REQUEST_HASH_MISMATCH"
-  | "NONCE_CONSUMED"
-  | "CAPABILITY_EXPIRED"
+  /** @see SECURITY_INVARIANT.md "6. Request forgery" — `payment.payment_request_hash == capability.payment_request_hash` (distinct from substitution) */
+  | "REQUEST_FORGERY"
+  /** @see SECURITY_INVARIANT.md "7. Replay" — `capability.nonce is unconsumed` (distinct from stale nonce by attack timing) */
+  | "REPLAY"
+  /** @see SECURITY_INVARIANT.md "8. Stale nonce" — `now < capability.expiry` (distinct from replay by attack timing) */
+  | "STALE_NONCE"
+  /** @see SECURITY_INVARIANT.md "9. Over-budget" — `(task.spent_so_far + payment.amount) <= task.max_total_spend` */
   | "BUDGET_EXCEEDED";
 
 /** Compile-time check that `authorizationFailureReasonSchema` and `AuthorizationFailureReason` stay in sync. */
