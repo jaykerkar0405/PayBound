@@ -631,59 +631,6 @@ function _assertReservedPaymentStateShape(
 }
 
 /**
- * The `RECOVERABLE` state, reachable only from `RESERVED`: the reservation
- * could not proceed to submission in a way that leaves the capability's
- * resources (nonce, budget) safely returnable or otherwise accounted for
- * without loss.
- *
- * TODO: the specific triggering conditions for this transition are not
- * specified by the source docs — see docs/OPEN_QUESTIONS.md "RECOVERABLE /
- * FAILED transition triggers are not specified in the source" (relevant to
- * task 1.5). This schema only encodes the transition's reachability
- * (RESERVED -> RECOVERABLE), not its triggering condition.
- * @see CAPABILITY_SPEC.md "The payment state machine" — `RECOVERABLE`
- */
-export const recoverablePaymentStateSchema = z
-  .object({
-    status: z.literal("RECOVERABLE"),
-    capability: capabilitySchema,
-    /** The RESERVED state this RECOVERABLE state transitioned from. */
-    reservedFrom: reservedPaymentStateSchema,
-  })
-  .readonly()
-  .describe("RECOVERABLE: reachable only from RESERVED; triggering conditions still open (see docs/OPEN_QUESTIONS.md).");
-/**
- * The `RECOVERABLE` state, reachable only from `RESERVED`: the reservation
- * could not proceed to submission in a way that leaves the capability's
- * resources (nonce, budget) safely returnable or otherwise accounted for
- * without loss.
- *
- * TODO: the specific triggering conditions for this transition are not
- * specified by the source docs — see docs/OPEN_QUESTIONS.md "RECOVERABLE /
- * FAILED transition triggers are not specified in the source" (relevant to
- * task 1.5). This type only encodes the transition's reachability
- * (RESERVED -> RECOVERABLE), not its triggering condition.
- *
- * Hand-written to preserve field-level hover JSDoc; kept in sync with
- * `recoverablePaymentStateSchema` by `_assertRecoverablePaymentStateShape`
- * below.
- * @see CAPABILITY_SPEC.md "The payment state machine" — `RECOVERABLE`
- */
-export interface RecoverablePaymentState {
-  readonly status: "RECOVERABLE";
-  readonly capability: Capability;
-  /** The RESERVED state this RECOVERABLE state transitioned from. */
-  readonly reservedFrom: ReservedPaymentState;
-}
-
-/** Compile-time check that `recoverablePaymentStateSchema` and `RecoverablePaymentState` stay in sync. */
-function _assertRecoverablePaymentStateShape(
-  x: z.infer<typeof recoverablePaymentStateSchema>,
-): RecoverablePaymentState {
-  return x;
-}
-
-/**
  * The `SUBMITTED` state: the Broker has constructed and signed the canonical
  * payment request and submitted it for settlement. Requires a `reservedFrom`
  * state so a `SUBMITTED` payment cannot be constructed without having first
@@ -761,6 +708,57 @@ export interface SettledPaymentState {
 function _assertSettledPaymentStateShape(
   x: z.infer<typeof settledPaymentStateSchema>,
 ): SettledPaymentState {
+  return x;
+}
+
+/** Schema for the RECOVERABLE state; see the `RecoverablePaymentState` type below for the full doc. */
+export const recoverablePaymentStateSchema = z
+  .object({
+    status: z.literal("RECOVERABLE"),
+    capability: capabilitySchema,
+    /** The SUBMITTED state this RECOVERABLE state transitioned from. */
+    submittedFrom: submittedPaymentStateSchema,
+  })
+  .readonly()
+  .describe(
+    "RECOVERABLE: reachable only from SUBMITTED; an unknown settlement outcome requiring reconciliation by transaction ID (CAPABILITY_SPEC.md 'Triggering conditions for RECOVERABLE and FAILED').",
+  );
+
+/**
+ * The `RECOVERABLE` state, reachable only from `SUBMITTED`: the outcome of
+ * the submission is unknown at the time of transition — caused by a network
+ * timeout, a connection failure, a Broker crash mid-flight, or any case
+ * where no confirmation was received from the settlement network. This is
+ * explicitly **not** the same as `FAILED`: the payment may or may not have
+ * actually settled.
+ *
+ * Moving to `RECOVERABLE` means the correct next step is to query the
+ * settlement network directly, by transaction ID, to determine the actual
+ * outcome — not to blindly retry submitting a new payment (which risks
+ * double-submission) and not to assume success or failure either way. Once
+ * reconciliation completes, the state machine transitions to the
+ * appropriate final state (`SETTLED` if the query confirms it actually
+ * settled, `FAILED` if it confirms it didn't). Requires a `submittedFrom`
+ * state so a `RECOVERABLE` payment cannot be constructed without having
+ * first passed through `SUBMITTED` — matching the same pattern
+ * `FailedPaymentState` uses.
+ *
+ * Hand-written to preserve field-level hover JSDoc; kept in sync with
+ * `recoverablePaymentStateSchema` by `_assertRecoverablePaymentStateShape`
+ * below.
+ * @see CAPABILITY_SPEC.md "Triggering conditions for `RECOVERABLE` and `FAILED`"
+ */
+export interface RecoverablePaymentState {
+  readonly status: "RECOVERABLE";
+  readonly capability: Capability;
+  /** The SUBMITTED state this RECOVERABLE state transitioned from. */
+  readonly submittedFrom: SubmittedPaymentState;
+}
+
+/** Compile-time check that `recoverablePaymentStateSchema` and `RecoverablePaymentState` stay in sync. */
+function _assertRecoverablePaymentStateShape(
+  x: z.infer<typeof recoverablePaymentStateSchema>,
+): RecoverablePaymentState {
   return x;
 }
 

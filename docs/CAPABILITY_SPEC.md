@@ -85,9 +85,10 @@ against.
 
 ```
 ISSUED → RESERVED → SUBMITTED → SETTLED
-              │           │
-              ↓           ↓
-        RECOVERABLE    FAILED
+                         │
+                   ┌─────┴─────┐
+                   ↓           ↓
+             RECOVERABLE    FAILED
 ```
 
 - **`ISSUED`** — the capability issuer has produced a signed `Capability`
@@ -103,11 +104,40 @@ ISSUED → RESERVED → SUBMITTED → SETTLED
 - **`SUBMITTED`** — the Broker has constructed and signed the canonical
   payment request and submitted it for settlement.
 - **`SETTLED`** — the settlement network has confirmed the payment.
-- **`RECOVERABLE`** — reachable from `RESERVED`: the reservation could not
-  proceed to submission in a way that leaves the capability's resources
-  (nonce, budget) safely returnable or otherwise accounted for without loss.
-- **`FAILED`** — reachable from `SUBMITTED`: the submitted payment did not
-  settle.
+- **`RECOVERABLE`** — reachable from `SUBMITTED`; see "Triggering conditions
+  for `RECOVERABLE` and `FAILED`" below.
+- **`FAILED`** — reachable from `SUBMITTED`; see "Triggering conditions for
+  `RECOVERABLE` and `FAILED`" below.
+
+### Triggering conditions for `RECOVERABLE` and `FAILED`
+
+Both `RECOVERABLE` and `FAILED` are reached from `SUBMITTED`, and the
+distinction between them is about what the Broker actually knows at the
+moment of transition — not about severity.
+
+- **`FAILED`** — the settlement network (Hedera) returns a definitive
+  negative result for the submitted transaction (e.g. rejected, invalid).
+  This is an unambiguous, known outcome: the payment definitely did not
+  settle. No reconciliation is needed; the state machine can move directly
+  to `FAILED`.
+
+- **`RECOVERABLE`** — the outcome of the submission is *unknown* at the time
+  of transition: caused by a network timeout, a connection failure, a
+  Broker crash mid-flight, or any case where no confirmation was received
+  from the settlement network. This is explicitly **not** the same as
+  `FAILED` — the payment may or may not have actually settled.
+
+  Moving to `RECOVERABLE` means the correct next step is to **query the
+  settlement network directly, by transaction ID, to determine the actual
+  outcome** — not to blindly retry submitting a new payment (which risks
+  double-submission) and not to assume success or failure either way. Once
+  reconciliation completes, the state machine transitions to the
+  appropriate final state: `SETTLED` if the query confirms the payment
+  actually settled, `FAILED` if it confirms the payment did not.
+
+  Because of this, `RECOVERABLE` requires a genuine reconciliation
+  mechanism against the settlement network as part of its implementation —
+  a query-by-transaction-ID path, not merely a retry loop.
 
 ## Atomicity note
 

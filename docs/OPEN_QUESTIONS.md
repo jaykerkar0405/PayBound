@@ -57,19 +57,23 @@ underlying request vs. wrong destination) — and "stale nonce" is now
 expiry-only, distinct from "replay" (nonce reuse), by attack timing. See
 `SECURITY_INVARIANT.md` for the full per-clause explanations and examples.
 
-## RECOVERABLE / FAILED transition triggers are not specified in the source
+## Resolved: RECOVERABLE / FAILED transition triggers (task 0.3.1b)
 
-**Status:** Unresolved. Non-blocking for Phase 0, but relevant to task 1.5.
+**Status:** Resolved.
 
-The source's state machine diagram shows `RESERVED -> RECOVERABLE` and
-`SUBMITTED -> FAILED` as branches, but never states the specific conditions
-that cause either transition (e.g., what makes a reservation abandoned or
-recoverable, versus a submission outright failing). `CAPABILITY_SPEC.md`
-describes these transitions in general terms consistent with their position
-in the diagram, without inventing specific triggering conditions beyond
-that. Whoever implements task 1.5 (the state machine) will need to define
-the actual triggering conditions for each branch — that's an implementation
-decision, not something this documentation pass should have guessed at.
+Previously: the source's state machine diagram showed `RECOVERABLE` and
+`FAILED` as branches but never stated the specific conditions that cause
+either transition.
+
+Decision: both are reached from `SUBMITTED`, distinguished by what the
+Broker actually knows at the moment of transition, not by severity —
+`FAILED` is a definitive negative result from the settlement network
+(known outcome, no reconciliation needed); `RECOVERABLE` is an unknown
+outcome (timeout, connection failure, broker crash mid-flight — no
+confirmation received), which requires querying the settlement network by
+transaction ID to reconcile to `SETTLED` or `FAILED`, not a blind retry.
+See `CAPABILITY_SPEC.md` "Triggering conditions for `RECOVERABLE` and
+`FAILED`" for the full definitions.
 
 ## Resolved: capability_id vs. nonce
 
