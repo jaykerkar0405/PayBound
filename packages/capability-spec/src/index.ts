@@ -1,53 +1,50 @@
 /**
- * Runtime validation for the shapes defined in @paybound/types.
+ * Runtime validation entry point for PayBound.
  *
- * @paybound/types is the source of truth for the *shape*; this package is the
- * source of truth for *runtime validation* of that shape. Schemas use Zod's
- * `.readonly()` so a successfully-parsed value is frozen (Object.freeze) at
- * runtime, matching the `readonly`/`Readonly<...>` compile-time types.
+ * `@paybound/types` is now the single source of truth for both shape and
+ * validation: every schema is defined there as a Zod schema, with the
+ * TypeScript type derived from it via `z.infer`. This package no longer
+ * defines a parallel set of schemas — it is a thin consumption layer that
+ * re-exports those schemas for use at actual runtime-validation call sites
+ * (e.g. wiring a schema into `@hono/zod-validator` in `apps/broker`).
  *
- * Placeholder fields — will be finalized alongside docs/TASKS.md 0.3.
+ * @see ../../types/src/index.ts for every schema's field-level JSDoc and its
+ *   citation back to docs/CAPABILITY_SPEC.md, docs/SECURITY_INVARIANT.md,
+ *   docs/THREAT_MODEL.md, and docs/TASKS.md.
  */
-import { z } from "zod";
-import type { Capability, PayRequest, PayResponse, Task } from "@paybound/types";
-
-export const capabilitySchema = z
-  .object({
-    taskHash: z.string(),
-    resourceId: z.string(),
-    recipient: z.string(),
-    exactAmount: z.string(),
-    paymentRequestHash: z.string(),
-    session: z.string(),
-    nonce: z.string(),
-    expiry: z.string(),
-    maxUses: z.literal(1),
-  })
-  .readonly();
-
-export const taskSchema = z
-  .object({
-    taskHash: z.string(),
-    maxTotalSpend: z.string(),
-    spentSoFar: z.string(),
-  })
-  .readonly();
-
-export const payRequestSchema = z.object({ capabilityId: z.string() }).readonly();
-
-export const payResponseSchema = z
-  .object({
-    state: z.enum(["ISSUED", "RESERVED", "SUBMITTED", "SETTLED", "RECOVERABLE", "FAILED"]),
-    paymentId: z.string(),
-  })
-  .readonly();
-
-// Compile-time check that the Zod-inferred shape stays assignable to the
-// hand-written types in @paybound/types — if the two drift apart, this file
-// fails to type-check.
-type _AssertCapability = z.infer<typeof capabilitySchema> extends Capability ? true : never;
-type _AssertTask = z.infer<typeof taskSchema> extends Task ? true : never;
-type _AssertPayRequest = z.infer<typeof payRequestSchema> extends PayRequest ? true : never;
-type _AssertPayResponse = z.infer<typeof payResponseSchema> extends PayResponse ? true : never;
-
-export type { Capability, Task, PayRequest, PayResponse } from "@paybound/types";
+export {
+  capabilitySchema,
+  taskSchema,
+  resourceRegistryEntrySchema,
+  issuedPaymentStateSchema,
+  reservedPaymentStateSchema,
+  recoverablePaymentStateSchema,
+  submittedPaymentStateSchema,
+  settledPaymentStateSchema,
+  failedPaymentStateSchema,
+  paymentStateSchema,
+  capabilityIdSchema,
+  payRequestSchema,
+  payResponseSchema,
+  paymentAuthorizationRequestSchema,
+  authorizePaymentInputSchema,
+  authorizationFailureReasonSchema,
+  authorizationResultSchema,
+  type Capability,
+  type Task,
+  type ResourceRegistryEntry,
+  type IssuedPaymentState,
+  type ReservedPaymentState,
+  type RecoverablePaymentState,
+  type SubmittedPaymentState,
+  type SettledPaymentState,
+  type FailedPaymentState,
+  type PaymentState,
+  type CapabilityId,
+  type PayRequest,
+  type PayResponse,
+  type PaymentAuthorizationRequest,
+  type AuthorizePaymentInput,
+  type AuthorizationFailureReason,
+  type AuthorizationResult,
+} from "@paybound/types";
