@@ -99,7 +99,11 @@ importers:
 
   packages/settlement: {}
 
-  packages/types: {}
+  packages/types:
+    dependencies:
+      zod:
+        specifier: ^4.5.4
+        version: 4.5.4
 
 packages:
 

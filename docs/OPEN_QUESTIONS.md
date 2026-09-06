@@ -87,3 +87,75 @@ in the diagram, without inventing specific triggering conditions beyond
 that. Whoever implements task 1.5 (the state machine) will need to define
 the actual triggering conditions for each branch — that's an implementation
 decision, not something this documentation pass should have guessed at.
+
+## Resolved: capability_id vs. nonce
+
+**Status:** Resolved.
+
+Previously flagged as a `TODO(docs-gap)` in `packages/types` (not tracked
+here): CAPABILITY_SPEC.md's 9 `Capability` fields don't define a
+`capability_id` distinct from `nonce`, leaving it ambiguous whether
+`pay(capability_id)` referenced the nonce directly.
+
+Decision: `capability_id` is a separate, opaque, branded lookup key
+(`CapabilityId` in `packages/types`), never the same value as `nonce`. The
+nonce stays internal to the Broker's replay-defense mechanism; the sandbox
+never sees or handles it. Rationale: an opaque reference and a
+replay-defense token should never be the same value, per THREAT_MODEL.md's
+framing of the sandbox's payment handle as an "opaque capability reference."
+See the relevant PR/commit for the full reasoning.
+
+## Resolved: ResourceRegistryEntry price field
+
+**Status:** Resolved.
+
+Previously flagged as a `TODO(docs-gap)` in `packages/types` (not tracked
+here): THREAT_MODEL.md/ARCHITECTURE.md describe the resource registry as
+only `resource_id -> recipient`, while `docs/TASKS.md` task 1.2 describes it
+as `resource_id -> recipient/price`.
+
+Decision: `docs/TASKS.md` task 1.2 is treated as authoritative on this
+point. `ResourceRegistryEntry` now includes a `price: Decimal` field,
+intended for a defense-in-depth check at capability issuance time (task
+1.3, not yet implemented) — validating that a requested `exactAmount` is
+consistent with the resource's known price. It is not read by
+`Broker.authorize(payment)`, which only compares `payment.amount` to
+`capability.exactAmount`. See the relevant PR/commit for the full reasoning.
+
+## Resolved: capability-spec drift-check pattern
+
+**Status:** Resolved.
+
+Previously observed (not tracked here as its own entry) while updating
+`packages/types`: `packages/capability-spec`'s compile-time drift check
+(`_AssertX = z.infer<...> extends X ? true : never`) did not actually
+enforce anything, since the resulting type alias was never consumed
+anywhere — TypeScript raises no diagnostic for an unused alias that resolves
+to `never`. A real mismatch (in `PayResponse`) went undetected by this
+mechanism.
+
+Decision: eliminate the two-layer pattern instead of trying to fix the
+check, but not by making the exported TypeScript types `z.infer`-derived.
+An initial follow-up did that (Zod schema as sole source, type derived via
+`z.infer`), but that regressed documentation quality: TypeScript does not
+propagate a `.describe()`/JSDoc pair written above a `z.object({...})`
+field into editor hover tooltips for the resulting `z.infer`-derived type's
+properties, so field-level JSDoc that was clearly present in source stopped
+showing up on hover. That regression was found and fixed as a further
+follow-up.
+
+The final mechanism, as `packages/types` now stands: Zod schemas remain
+canonical for runtime validation and for field-level `.describe()`/JSDoc
+authorship. The exported TypeScript types for object/union shapes
+(`Capability`, `Task`, `ResourceRegistryEntry`, the payment-state types,
+`PayRequest`, `PayResponse`, `CapabilityId`, and the authorization types)
+are hand-written `interface`/`type` declarations instead, specifically to
+preserve hover-tooltip JSDoc, with their field JSDoc copied verbatim from
+the schema. Each hand-written type is paired with an unexported
+`_assertXShape` function (e.g. `_assertCapabilityShape`) whose parameter is
+typed as `z.infer<typeof xSchema>` and whose return type is the
+hand-written type — since parameter and return types are always
+type-checked, this fails to compile the moment the two diverge, unlike the
+original broken assertion. `packages/capability-spec` still re-exports
+these schemas/types rather than defining its own. See the relevant PR/commit
+for the full reasoning.
