@@ -44,6 +44,25 @@ not depend on distinguishing these causes from one another.
   Broker's signature.
 - A **legitimately-vetted resource that later turns malicious**.
 
+## Escalation is not one of the Broker's invariant clauses
+
+Escalation — pausing and routing to human review when an agent attempts to
+reference an out-of-registry/unlisted resource (the demo's Moment C) — is a
+design decision at the agent/sandbox layer, not one of the 9 clauses in
+[`SECURITY_INVARIANT.md`](./SECURITY_INVARIANT.md)'s `Broker.authorize(payment)`
+invariant. The Broker's formal invariant has no `ESCALATED` state: its
+clauses are a flat hard-fail conjunction, consistent with the payment state
+machine's `ISSUED -> RESERVED -> SUBMITTED -> SETTLED`/`RECOVERABLE`/`FAILED`
+structure (see `CAPABILITY_SPEC.md`) — every clause either holds or it
+doesn't, and a failing clause hard-fails the payment, full stop. If an
+out-of-registry resource request ever reached `Broker.authorize` anyway, it
+would simply fail the resource-mismatch clause, not escalate.
+
+Escalation sits above that boundary: it's a UX/product behavior for
+out-of-scope requests, giving the system a designed "pause and ask" option
+before an attempt ever reaches the Broker — not a weakening of the invariant
+itself, and not a third outcome the invariant needs to formally represent.
+
 ## Why naming these exclusions is a strength, not a weakness
 
 Naming these isn't a weakness — it's what makes everything inside the

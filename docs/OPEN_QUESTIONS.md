@@ -35,44 +35,27 @@ before 1.5/1.6 are implemented:
 This question is intentionally left open here — no resolution is proposed,
 only the conflict and its downstream impact.
 
-## Violation-type labeling in SECURITY_INVARIANT.md is an interpretation
+## Resolved: violation-type labeling in SECURITY_INVARIANT.md (task 0.3.1)
 
-**Status:** Unresolved. Non-blocking (documentation clarity only).
+**Status:** Resolved.
 
-The spec (and `docs/TASKS.md` task 0.2) names exactly seven violation types
-for the invariant's clauses: replay, substitution, escalation, stale nonce,
-session mismatch, task_hash mismatch, and over-budget. The invariant itself
-has nine conjuncts. `SECURITY_INVARIANT.md` had to make two judgment calls
-that aren't settled by the source text:
+The spec's 7 named violation types (replay, substitution, escalation, stale
+nonce, session mismatch, task_hash mismatch, over-budget) didn't cover the
+invariant's 9 clauses without ambiguity — see the git history of this
+section for the original analysis of exactly where they fell short.
 
-- **`stale nonce`** was mapped to the `now < capability.expiry` clause,
-  rather than to nonce reuse (which was mapped to `replay`). The source
-  never states whether "stale nonce" means an expired capability or a
-  consumed-nonce replay attempt — these are two different failure
-  mechanisms sharing an ambiguous name.
-- **`substitution`** was applied to both the amount clause
-  (`payment.amount == capability.exact_amount`) and the destination clause
-  (`payment.destination == capability.recipient`), since the source's
-  three-moment demo (Moment B) describes a substitution attack that changes
-  destination while holding amount fixed, but doesn't explicitly say whether
-  an amount-only mismatch is also called "substitution" or is its own
-  category.
-- **`payment.resource == capability.resource_id`** was labeled
-  `escalation`, matching Moment C ("use a different, unlisted resource").
-  This one is fairly directly supported by the source, but is included here
-  for completeness since it's part of the same mapping exercise.
-- **`payment.payment_request_hash == capability.payment_request_hash`** does
-  not map cleanly to any of the seven named violation types. It was
-  described in `SECURITY_INVARIANT.md` without forcing it into one of the
-  seven labels, rather than inventing an eighth name not present in the
-  source.
-
-None of this affects the invariant's enforcement (every clause is still
-checked exactly as written); it only affects what to call a given violation
-in logs, error messages, or test names. Worth settling — possibly as part of
-task 0.4 (wire protocol error codes) or task 1.8 (property tests), where a
-concrete list of test/error names will be needed anyway — before those names
-get baked into code.
+Decision: each of the 9 clauses now has one explicit, unambiguous name,
+spelled out in `SECURITY_INVARIANT.md` "Each clause, and what violating it
+means" (1. Amount mismatch, 2. Substitution, 3. Resource mismatch, 4.
+Task_hash mismatch, 5. Session mismatch, 6. Request forgery, 7. Replay, 8.
+Stale nonce, 9. Over-budget). Two names are new relative to the original
+seven — **resource mismatch** (distinct from escalation, which is a
+sandbox/agent-layer UX decision, not a `Broker.authorize` outcome — see
+`THREAT_MODEL.md` "Escalation is not one of the Broker's invariant
+clauses") and **request forgery** (distinct from substitution: wrong
+underlying request vs. wrong destination) — and "stale nonce" is now
+expiry-only, distinct from "replay" (nonce reuse), by attack timing. See
+`SECURITY_INVARIANT.md` for the full per-clause explanations and examples.
 
 ## RECOVERABLE / FAILED transition triggers are not specified in the source
 

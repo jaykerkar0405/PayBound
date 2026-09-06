@@ -35,13 +35,17 @@ an unambiguous contract to build against. Do these first and in this order.
       problem/core idea condensed, the three-component system mapped onto the
       repo structure, the three-moment demo, and the core-vs-optional
       architecture split. *(Broker)*
-- [ ] **0.3.1** Resolve interpretive gaps flagged during 0.1-0.3 drafting (see
-      `docs/OPEN_QUESTIONS.md`): the mapping of the 7 named violation types
-      (replay, substitution, escalation, stale nonce, session mismatch,
-      task_hash mismatch, over-budget) onto the invariant's 9 clauses, and the
-      unspecified `RECOVERABLE`/`FAILED` transition triggers. Blocks 1.8 —
-      the property tests can't be written correctly against ambiguous
-      violation names or undefined transition conditions. *(Broker)*
+- [x] **0.3.1a** Resolve mapping between the 7 originally-named violation
+      types and SECURITY_INVARIANT.md's 9 formal clauses. Added 2 new named
+      violation types (resource mismatch, request forgery) and reclassified
+      escalation as an agent/sandbox-layer behavior rather than a
+      `Broker.authorize()` clause. *(Broker)*
+- [ ] **0.3.1b** Specify the exact triggering conditions for the
+      `RECOVERABLE` and `FAILED` payment-state transitions (currently
+      unspecified beyond their position in the state-machine diagram in
+      CAPABILITY_SPEC.md). Blocks 1.8 — the property tests can't be written
+      correctly against undefined transition conditions for these two
+      branches. *(Broker)*
 - [ ] **0.4** Define the Broker↔Agent-sandbox wire protocol: the single `pay(capability_id)`
       call's request/response shape, error codes, and how the sandbox's attested
       workload identity is presented on the channel. Depends on 0.3. *(Broker + Sandbox, joint)*
