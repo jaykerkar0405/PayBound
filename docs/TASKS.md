@@ -5,9 +5,9 @@ Each task is scoped to be completable in a single focused session by one person.
 Check items off as they're completed.
 
 Ownership areas (not formal assignment, just where each task naturally falls):
-- **[Broker]** — Chirag: Broker / capability core
-- **[Sandbox]** — Person B: sandbox / agent / attack scenarios / Ledger integration
-- **[Settlement]** — Person C: Hedera/HCS / Chainlink CRE / demo
+- **[Broker]** — Dev A: Broker / capability core
+- **[Sandbox]** — Dev B: sandbox / agent / attack scenarios / Ledger integration
+- **[Settlement]** — Dev C: Hedera/HCS / Chainlink CRE / demo
 
 **Submission deadline: Sept 13, 2026.**
 
