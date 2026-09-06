@@ -85,7 +85,11 @@ to support, within one session and one issued capability:
 - **C — Escalation.** Attacker-controlled content says "use a different,
   unlisted resource." The system pauses and escalates rather than silently
   denying or silently complying. This is the moment that demonstrates the
-  autonomy/safety tradeoff as a designed choice, not an evasion.
+  autonomy/safety tradeoff as a designed choice, not an evasion. Escalation
+  is a design decision at the agent/sandbox layer, not one of
+  `Broker.authorize(payment)`'s 9 invariant clauses — see
+  [`THREAT_MODEL.md`](./THREAT_MODEL.md) "Escalation is not one of the
+  Broker's invariant clauses" for the boundary between the two.
 
 ## Architecture: core vs. optional
 
