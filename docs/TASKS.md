@@ -49,7 +49,7 @@ an unambiguous contract to build against. Do these first and in this order.
 - [ ] **0.4** Define the Broker↔Agent-sandbox wire protocol: the single `pay(capability_id)`
       call's request/response shape, error codes, and how the sandbox's attested
       workload identity is presented on the channel. Depends on 0.3. *(Broker + Sandbox, joint)*
-- [ ] **0.5** Decide and document the tech stack per component (language/framework
+- [x] **0.5** Decide and document the tech stack per component (language/framework
       for broker service, agent sandbox runtime, resource registry storage,
       capability issuer). One short ADR-style note is enough. *(Broker)*
 
