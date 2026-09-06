@@ -40,7 +40,7 @@ an unambiguous contract to build against. Do these first and in this order.
       violation types (resource mismatch, request forgery) and reclassified
       escalation as an agent/sandbox-layer behavior rather than a
       `Broker.authorize()` clause. *(Broker)*
-- [ ] **0.3.1b** Specify the exact triggering conditions for the
+- [x] **0.3.1b** Specify the exact triggering conditions for the
       `RECOVERABLE` and `FAILED` payment-state transitions (currently
       unspecified beyond their position in the state-machine diagram in
       CAPABILITY_SPEC.md). Blocks 1.8 — the property tests can't be written
@@ -137,7 +137,13 @@ can start once 1.7 exists.
       and settlement outcomes as HCS messages. Depends on 4.1. *(Settlement)*
 - [ ] **4.3** Update the payment state machine's `SUBMITTED -> SETTLED/FAILED`
       transition to reflect real Hedera settlement results instead of a stub.
-      Depends on 4.1, 1.5. *(Settlement)*
+      Note (per CAPABILITY_SPEC.md "Triggering conditions for RECOVERABLE and
+      FAILED", task 0.3.1b): implementing the `RECOVERABLE` path requires
+      querying Hedera by transaction ID for reconciliation, not just retry
+      logic — a definitive negative result goes straight to `FAILED`, but an
+      unknown outcome (timeout, connection failure, broker crash mid-flight)
+      must be reconciled against Hedera before resolving to `SETTLED` or
+      `FAILED`. Depends on 4.1, 1.5. *(Settlement)*
 
 ## Phase 5 — Optional Confidential Policy Check (Chainlink CRE)
 
