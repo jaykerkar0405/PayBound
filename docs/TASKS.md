@@ -18,18 +18,30 @@ Ownership areas (not formal assignment, just where each task naturally falls):
 These formalize what's already described in the README so every later task has
 an unambiguous contract to build against. Do these first and in this order.
 
-- [ ] **0.1** `THREAT_MODEL.md` — write out the trusted/adversarial boundary from the
+- [x] **0.1** `THREAT_MODEL.md` — write out the trusted/adversarial boundary from the
       README's Security Model section as a standalone doc: trusted components,
       adversarial inputs, and the explicitly-out-of-scope list. *(Broker)*
-- [ ] **0.2** `SECURITY_INVARIANT.md` — formalize the `Broker.authorize(payment)`
+- [x] **0.2** `SECURITY_INVARIANT.md` — formalize the `Broker.authorize(payment)`
       invariant from the README, including what "violates" means for each clause
       (replay, substitution, escalation, stale nonce, session mismatch, task_hash
       mismatch, over-budget). Depends on 0.1. *(Broker)*
-- [ ] **0.3** `CAPABILITY_SPEC.md` — define the exact wire format (JSON schema or
+- [x] **0.3** `CAPABILITY_SPEC.md` — define the exact wire format (JSON schema or
       equivalent) for `Capability` and `Task` objects, field types, encoding of
       hashes, and the state machine transitions (`ISSUED -> RESERVED -> SUBMITTED
       -> SETTLED`, plus `RECOVERABLE`/`FAILED`) with the preconditions/postconditions
       of each transition. Depends on 0.2. *(Broker)*
+- [x] **0.3a** `ARCHITECTURE.md` — high-level overview doc (not originally a
+      numbered task, but written alongside 0.1-0.3 and worth tracking): the
+      problem/core idea condensed, the three-component system mapped onto the
+      repo structure, the three-moment demo, and the core-vs-optional
+      architecture split. *(Broker)*
+- [ ] **0.3.1** Resolve interpretive gaps flagged during 0.1-0.3 drafting (see
+      `docs/OPEN_QUESTIONS.md`): the mapping of the 7 named violation types
+      (replay, substitution, escalation, stale nonce, session mismatch,
+      task_hash mismatch, over-budget) onto the invariant's 9 clauses, and the
+      unspecified `RECOVERABLE`/`FAILED` transition triggers. Blocks 1.8 —
+      the property tests can't be written correctly against ambiguous
+      violation names or undefined transition conditions. *(Broker)*
 - [ ] **0.4** Define the Broker↔Agent-sandbox wire protocol: the single `pay(capability_id)`
       call's request/response shape, error codes, and how the sandbox's attested
       workload identity is presented on the channel. Depends on 0.3. *(Broker + Sandbox, joint)*
