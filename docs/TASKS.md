@@ -111,7 +111,7 @@ needs the broker's `pay()` endpoint (1.7).
 - [x] **2.7** Build attack scenario 2: injected instruction attempting to make
       the agent sign/call payment infra directly, bypassing the broker
       (should fail — no signing key, no network path). Depends on 2.2, 2.5. *(Sandbox)*
-- [ ] **2.8** Build attack scenario 3: replay/reuse of a previously-used
+- [x] **2.8** Build attack scenario 3: replay/reuse of a previously-used
       capability_id or expired capability (should be rejected by broker's
       `authorize`). Depends on 1.8, 2.5. *(Sandbox)*
 - [ ] **2.9** Live demonstration harness for the network boundary claim: show
