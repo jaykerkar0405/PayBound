@@ -128,6 +128,9 @@ importers:
       '@paybound/capability-spec':
         specifier: workspace:*
         version: link:../capability-spec
+      zod:
+        specifier: ^4.5.4
+        version: 4.5.4
 
   packages/types:
     dependencies:
