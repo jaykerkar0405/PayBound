@@ -114,7 +114,7 @@ needs the broker's `pay()` endpoint (1.7).
 - [x] **2.8** Build attack scenario 3: replay/reuse of a previously-used
       capability_id or expired capability (should be rejected by broker's
       `authorize`). Depends on 1.8, 2.5. *(Sandbox)*
-- [ ] **2.9** Live demonstration harness for the network boundary claim: show
+- [x] **2.9** Live demonstration harness for the network boundary claim: show
       the sandbox's egress policy actually blocking direct calls to a
       wallet/facilitator/RPC, not just diagram it. Depends on 2.2. *(Sandbox)*
 
