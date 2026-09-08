@@ -84,6 +84,16 @@ separate DB process to reason about, which is exactly what "atomic, no gap
 between checking and consuming" requires. Revisit this if/when the broker
 needs to run as more than one instance.
 
+**Deployment scope note:** for this hackathon, the Broker runs as a single
+process holding a single SQLite connection (`apps/broker/src/db.ts`) — a
+deliberate scope decision, not a production deployment claim.
+Multi-instance/horizontally-scaled deployment against a shared SQLite file
+is explicitly out of scope. The `busy_timeout` pragma set on that
+connection is cheap insurance against transient single-process contention
+(e.g. WAL checkpointing, or multiple in-process callers), not multi-instance
+support — a real multi-instance deployment would need a different storage
+layer entirely, not just a longer timeout.
+
 ### Agent sandbox (`apps/sandbox`) — Docker + locked-down egress; Vercel AI SDK (`ai`)
 
 Docker over a microVM (e.g. Firecracker) for this phase: Docker's network
