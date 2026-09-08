@@ -98,7 +98,7 @@ needs the broker's `pay()` endpoint (1.7).
 - [x] **2.3** Establish the sandbox's attested workload identity, created before
       the agent is exposed to any untrusted content, and wire it into the
       channel handshake defined in 0.4. Depends on 2.2, 0.4. *(Sandbox)*
-- [ ] **2.4** Implement the agent's payment tool: exactly one parameter
+- [x] **2.4** Implement the agent's payment tool: exactly one parameter
       (`capability_id`), no destination/amount fields, calling the broker's
       `pay()` endpoint from 1.7. Depends on 2.3, 1.7. *(Sandbox)*
 - [ ] **2.5** Wire up a minimal agent loop (LLM + tool-use) that can read
