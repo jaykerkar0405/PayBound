@@ -1,4 +1,5 @@
 import {
+  capabilityIdSchema,
   issuedPaymentStateSchema,
   reservedPaymentStateSchema,
   submittedPaymentStateSchema,
@@ -59,6 +60,22 @@ const selectCapabilityStatement = db.prepare<[string], CapabilityRow>(
 const markConsumedStatement = db.prepare<[string]>(
   "UPDATE capabilities SET consumed = 1 WHERE capability_id = ?",
 );
+
+const selectCapabilityIdByNonceStatement = db.prepare<[string], { capability_id: string }>(
+  "SELECT capability_id FROM capabilities WHERE nonce = ?",
+);
+
+/**
+ * Looks up the externally-facing capabilityId for a given nonce. Used by
+ * Broker.authorize (task 1.6), whose AuthorizePaymentInput carries the full
+ * Capability (and thus its nonce) but not the opaque capabilityId
+ * reservePayment is keyed by — nonce is unique in the capabilities table,
+ * so this bridges the two.
+ */
+export function getCapabilityIdByNonce(nonce: Capability["nonce"]): CapabilityId | undefined {
+  const row = selectCapabilityIdByNonceStatement.get(nonce);
+  return row === undefined ? undefined : capabilityIdSchema.parse(row.capability_id);
+}
 
 // ---------------------------------------------------------------------------
 // Submitted payments: persists the SUBMITTED transition's stub signature and
