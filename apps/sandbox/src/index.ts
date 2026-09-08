@@ -1,10 +1,10 @@
 /**
- * PayBound Agent Sandbox — Runtime Entrypoint (Task 2.1 - 2.3)
+ * PayBound Agent Sandbox — Runtime Entrypoint (Task 2.1 - 2.5)
  *
  * Scaffolds the sandbox environment:
  * 1. Network isolation & egress policy (tasks 2.1, 2.2).
  * 2. Establishes attested workload identity before reading any untrusted content (task 2.3).
- * 3. Payment tool (task 2.4) and agent loop (task 2.5) land in subsequent Phase 2 tasks.
+ * 3. Payment tool (task 2.4) and agent loop (task 2.5).
  */
 
 import { generateSandboxAttestation, type SandboxAttestation } from "./attestation.js";
