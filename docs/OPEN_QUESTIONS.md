@@ -150,6 +150,51 @@ consistent with the resource's known price. It is not read by
 `Broker.authorize(payment)`, which only compares `payment.amount` to
 `capability.exactAmount`. See the relevant PR/commit for the full reasoning.
 
+## Resolved: nonce omitted from PayResponse via a dedicated public payment-state type
+
+**Status:** Resolved.
+
+Previously (found while implementing task 1.7, the `pay()` route): `docs/PROTOCOL.md`
+§3 specifies that a successful response nests the full `ISSUED -> RESERVED
+-> SUBMITTED` history, and `Capability` (`packages/types`) requires `nonce`
+as a mandatory field — so the then-current `PayResponse`/`PaymentState`
+types structurally included the nonce in every successful `pay()` response.
+That directly conflicted with "Resolved: capability_id vs. nonce" above:
+"The nonce stays internal to the Broker's replay-defense mechanism; the
+sandbox never sees or handles it." The first fix for this (a runtime
+`redactNonce()` step in `apps/broker/src/routes/pay.ts` that recursively
+stripped any `nonce` key from the outgoing JSON) worked, but meant the
+emitted response no longer matched what `PayResponse`'s own type claimed to
+guarantee — a real, silent type/runtime gap.
+
+Decision: `packages/types` now defines `PublicCapability` (`Capability`
+with `nonce` omitted, derived via Zod's `.omit()` from the same object
+schema `capabilitySchema` is built from, so it cannot drift from the real
+`Capability` shape) and a full mirrored payment-state union —
+`PublicIssuedPaymentState`, `PublicReservedPaymentState`,
+`PublicSubmittedPaymentState`, `PublicSettledPaymentState`,
+`PublicRecoverablePaymentState`, `PublicFailedPaymentState`, and
+`PublicPaymentState` — each identical to its `PaymentState` counterpart
+except every nested capability is `PublicCapability`. `PayResponse.state`
+is now typed as `PublicPaymentState`, not `PaymentState`: it is
+structurally impossible to represent a nonce in a `pay()` response, not
+just conventionally avoided. `apps/broker/src/routes/pay.ts` builds its
+success response via `publicSubmittedPaymentStateSchema.parse(submitted)`
+— Zod's default object parsing drops keys outside the target shape, so
+passing the real, nonce-carrying `SubmittedPaymentState` through this
+schema validates the response and drops the nonce in one step; the
+`redactNonce()` runtime stripper has been removed entirely. See the
+relevant PR/commit for the full reasoning.
+
+Also fixed alongside this: `AuthorizationResult`'s success case
+(`{ authorized: true }`) previously discarded the real `ReservedPaymentState`
+that a successful `Broker.authorize(payment)` call produces as a side
+effect of its internal `reservePayment` call, forcing callers (the `pay()`
+route) to reconstruct an equivalent value from a second database read.
+`AuthorizationResult`'s success case is now `{ authorized: true, state:
+ReservedPaymentState }`, and `apps/broker/src/routes/pay.ts` uses that real
+state directly.
+
 ## Resolved: capability-spec drift-check pattern
 
 **Status:** Resolved.

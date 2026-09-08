@@ -121,7 +121,7 @@ describe("POST /pay", () => {
     expect(await res.json()).toEqual({ authorized: false, reason: "BUDGET_EXCEEDED" });
   });
 
-  it("never includes a nonce field anywhere in a successful pay response", async () => {
+  it("never includes a nonce field anywhere in a successful pay response (regression guard — enforced structurally by PublicPaymentState/publicSubmittedPaymentStateSchema, not a runtime strip step)", async () => {
     const capabilityId = setUpCapability();
 
     const res = await postPay({ capabilityId });

@@ -153,8 +153,7 @@ export type Timestamp = z.infer<typeof timestampSchema>;
  *
  * @see CAPABILITY_SPEC.md "The `Capability` object"
  */
-export const capabilitySchema = z
-  .object({
+const capabilityObjectSchema = z.object({
     /**
      * Hash of the canonical task definition. Not a version number — a
      * content hash, so any change to the task's meaning changes the hash.
@@ -247,8 +246,22 @@ export const capabilitySchema = z
       .literal(1)
       .describe("Fixed at 1; capabilities are single-use unless explicitly justified otherwise (CAPABILITY_SPEC.md: max_uses)."),
   })
-  .readonly()
   .describe("A trusted, unforgeable, single-use grant of exactly one payment (CAPABILITY_SPEC.md: the Capability object).");
+
+/**
+ * A trusted, unforgeable, single-use grant of exactly one payment, issued by
+ * the Broker before the agent touches any untrusted input.
+ *
+ * All 9 fields below are taken directly from CAPABILITY_SPEC.md's
+ * `Capability` object definition — no fields have been added or removed.
+ *
+ * Built from `capabilityObjectSchema` (kept unexported, pre-`.readonly()`)
+ * so `publicCapabilitySchema` below can derive from the same shape via
+ * `.omit()` rather than a hand-duplicated object, and can never drift from
+ * this definition.
+ * @see CAPABILITY_SPEC.md "The `Capability` object"
+ */
+export const capabilitySchema = capabilityObjectSchema.readonly();
 
 /**
  * A trusted, unforgeable, single-use grant of exactly one payment, issued by
@@ -339,6 +352,102 @@ export interface Capability {
 
 /** Compile-time check that `capabilitySchema` and `Capability` stay in sync. */
 function _assertCapabilityShape(x: z.infer<typeof capabilitySchema>): Capability {
+  return x;
+}
+
+/**
+ * `Capability` with `nonce` omitted. `nonce` is the Broker's internal
+ * replay-defense token and must never reach the untrusted sandbox domain
+ * (THREAT_MODEL.md; docs/OPEN_QUESTIONS.md "Resolved: capability_id vs.
+ * nonce" — "The nonce stays internal to the Broker's replay-defense
+ * mechanism; the sandbox never sees or handles it."). Derived via Zod's
+ * `.omit()` from `capabilityObjectSchema` — the same object schema
+ * `capabilitySchema` itself is built from — so this can never drift from
+ * the real `Capability` definition by hand-duplicating its shape.
+ * @see CAPABILITY_SPEC.md "The `Capability` object"
+ * @see docs/OPEN_QUESTIONS.md "Resolved: nonce omitted from PayResponse via a dedicated public payment-state type"
+ */
+export const publicCapabilitySchema = capabilityObjectSchema.omit({ nonce: true }).readonly();
+
+/**
+ * `Capability` with `nonce` omitted — the shape actually safe to put on
+ * the sandbox-facing wire (see `PublicPaymentState`/`PayResponse` below).
+ *
+ * Hand-written (rather than `Omit<Capability, "nonce">`) to preserve
+ * field-level hover JSDoc, following this file's established pattern;
+ * kept in sync with `publicCapabilitySchema` by
+ * `_assertPublicCapabilityShape` below.
+ * @see CAPABILITY_SPEC.md "The `Capability` object"
+ */
+export interface PublicCapability {
+  /**
+   * Hash of the canonical task definition. Not a version number — a
+   * content hash, so any change to the task's meaning changes the hash.
+   * Scopes the capability to a specific task.
+   * @see CAPABILITY_SPEC.md field: `task_hash`
+   * @see SECURITY_INVARIANT.md clause: `payment.task_hash == capability.task_hash`
+   */
+  readonly taskHash: Hash;
+
+  /**
+   * UUID bound to an entry in the trusted resource registry. Scopes the
+   * capability to one specific, pre-vetted resource.
+   * @see CAPABILITY_SPEC.md field: `resource_id`
+   * @see SECURITY_INVARIANT.md clause: `payment.resource == capability.resource_id`
+   * @see THREAT_MODEL.md "Resource registry"
+   */
+  readonly resourceId: Uuid;
+
+  /**
+   * Destination address, fixed at vetting time and immutable thereafter.
+   * @see CAPABILITY_SPEC.md field: `recipient`
+   * @see SECURITY_INVARIANT.md clause: `payment.destination == capability.recipient`
+   */
+  readonly recipient: Address;
+
+  /**
+   * The exact amount to be paid. Exact, not "up to" — there is no dynamic
+   * pricing in the MVP, so this is a fixed value, not a ceiling.
+   * @see CAPABILITY_SPEC.md field: `exact_amount`
+   * @see SECURITY_INVARIANT.md clause: `payment.amount == capability.exact_amount`
+   */
+  readonly exactAmount: Decimal;
+
+  /**
+   * Hash binding *what* this payment is for, distinct from where it goes
+   * or how much it costs.
+   * @see CAPABILITY_SPEC.md field: `payment_request_hash`
+   * @see SECURITY_INVARIANT.md clause: `payment.payment_request_hash == capability.payment_request_hash`
+   */
+  readonly paymentRequestHash: Hash;
+
+  /**
+   * The sandbox's attested workload identity this capability is bound to.
+   * @see CAPABILITY_SPEC.md field: `session`
+   * @see SECURITY_INVARIANT.md clause: `payment.session == capability.session`
+   */
+  readonly session: PublicKey;
+
+  /**
+   * Timestamp after which the capability is no longer valid. Short-lived
+   * by default.
+   * @see CAPABILITY_SPEC.md field: `expiry`
+   * @see SECURITY_INVARIANT.md clause: `now < capability.expiry`
+   */
+  readonly expiry: Timestamp;
+
+  /**
+   * Fixed at 1 unless explicitly justified otherwise: capabilities are
+   * single-use.
+   * @see CAPABILITY_SPEC.md field: `max_uses`
+   */
+  readonly maxUses: 1;
+}
+
+/** Compile-time check that `publicCapabilitySchema` and `PublicCapability` stay in sync. */
+function _assertPublicCapabilityShape(
+  x: z.infer<typeof publicCapabilitySchema>,
+): PublicCapability {
   return x;
 }
 
@@ -851,6 +960,250 @@ export type PaymentState =
   | FailedPaymentState;
 
 // ---------------------------------------------------------------------------
+// Public (nonce-omitted) payment state machine
+//
+// Mirrors the six states above field-for-field, except every nested
+// Capability is `PublicCapability` (nonce omitted) instead of `Capability`.
+// This is the sandbox-facing wire shape: PayResponse (below) uses
+// PublicPaymentState, not PaymentState, so it is structurally impossible
+// to serialize a nonce into a pay() response — enforced by the type
+// system, not a runtime strip step. See docs/OPEN_QUESTIONS.md "Resolved:
+// nonce omitted from PayResponse via a dedicated public payment-state
+// type".
+// ---------------------------------------------------------------------------
+
+/** Schema for the sandbox-facing ISSUED state; see `PublicIssuedPaymentState` below for the full doc. */
+export const publicIssuedPaymentStateSchema = z
+  .object({
+    status: z.literal("ISSUED"),
+    capability: publicCapabilitySchema,
+  })
+  .readonly()
+  .describe("Sandbox-facing ISSUED state: same as IssuedPaymentState, nonce omitted (CAPABILITY_SPEC.md state machine).");
+
+/**
+ * Sandbox-facing mirror of `IssuedPaymentState`, with `nonce` omitted from
+ * the nested capability.
+ *
+ * Hand-written to preserve field-level hover JSDoc; kept in sync with
+ * `publicIssuedPaymentStateSchema` by
+ * `_assertPublicIssuedPaymentStateShape` below.
+ * @see CAPABILITY_SPEC.md "The payment state machine" — `ISSUED`
+ */
+export interface PublicIssuedPaymentState {
+  readonly status: "ISSUED";
+  /** The capability this payment state is for, nonce omitted. */
+  readonly capability: PublicCapability;
+}
+
+/** Compile-time check that `publicIssuedPaymentStateSchema` and `PublicIssuedPaymentState` stay in sync. */
+function _assertPublicIssuedPaymentStateShape(
+  x: z.infer<typeof publicIssuedPaymentStateSchema>,
+): PublicIssuedPaymentState {
+  return x;
+}
+
+/** Schema for the sandbox-facing RESERVED state; see `PublicReservedPaymentState` below for the full doc. */
+export const publicReservedPaymentStateSchema = z
+  .object({
+    status: z.literal("RESERVED"),
+    capability: publicCapabilitySchema,
+    issuedFrom: publicIssuedPaymentStateSchema,
+  })
+  .readonly()
+  .describe("Sandbox-facing RESERVED state: same as ReservedPaymentState, nonce omitted (CAPABILITY_SPEC.md state machine).");
+
+/**
+ * Sandbox-facing mirror of `ReservedPaymentState`, with `nonce` omitted
+ * from the nested capability at every level.
+ *
+ * Hand-written to preserve field-level hover JSDoc; kept in sync with
+ * `publicReservedPaymentStateSchema` by
+ * `_assertPublicReservedPaymentStateShape` below.
+ * @see CAPABILITY_SPEC.md "The payment state machine" — `RESERVED`
+ */
+export interface PublicReservedPaymentState {
+  readonly status: "RESERVED";
+  readonly capability: PublicCapability;
+  /** The ISSUED state this RESERVED state transitioned from, nonce omitted. */
+  readonly issuedFrom: PublicIssuedPaymentState;
+}
+
+/** Compile-time check that `publicReservedPaymentStateSchema` and `PublicReservedPaymentState` stay in sync. */
+function _assertPublicReservedPaymentStateShape(
+  x: z.infer<typeof publicReservedPaymentStateSchema>,
+): PublicReservedPaymentState {
+  return x;
+}
+
+/** Schema for the sandbox-facing SUBMITTED state; see `PublicSubmittedPaymentState` below for the full doc. */
+export const publicSubmittedPaymentStateSchema = z
+  .object({
+    status: z.literal("SUBMITTED"),
+    capability: publicCapabilitySchema,
+    reservedFrom: publicReservedPaymentStateSchema,
+  })
+  .readonly()
+  .describe("Sandbox-facing SUBMITTED state: same as SubmittedPaymentState, nonce omitted (CAPABILITY_SPEC.md state machine).");
+
+/**
+ * Sandbox-facing mirror of `SubmittedPaymentState`, with `nonce` omitted
+ * from the nested capability at every level. This is the shape `PayResponse`
+ * actually carries on a successful `pay()` call (docs/PROTOCOL.md §3).
+ *
+ * Hand-written to preserve field-level hover JSDoc; kept in sync with
+ * `publicSubmittedPaymentStateSchema` by
+ * `_assertPublicSubmittedPaymentStateShape` below.
+ * @see CAPABILITY_SPEC.md "The payment state machine" — `SUBMITTED`
+ */
+export interface PublicSubmittedPaymentState {
+  readonly status: "SUBMITTED";
+  readonly capability: PublicCapability;
+  /** The RESERVED state this SUBMITTED state transitioned from, nonce omitted. */
+  readonly reservedFrom: PublicReservedPaymentState;
+}
+
+/** Compile-time check that `publicSubmittedPaymentStateSchema` and `PublicSubmittedPaymentState` stay in sync. */
+function _assertPublicSubmittedPaymentStateShape(
+  x: z.infer<typeof publicSubmittedPaymentStateSchema>,
+): PublicSubmittedPaymentState {
+  return x;
+}
+
+/** Schema for the sandbox-facing SETTLED state; see `PublicSettledPaymentState` below for the full doc. */
+export const publicSettledPaymentStateSchema = z
+  .object({
+    status: z.literal("SETTLED"),
+    capability: publicCapabilitySchema,
+    submittedFrom: publicSubmittedPaymentStateSchema,
+  })
+  .readonly()
+  .describe("Sandbox-facing SETTLED state: same as SettledPaymentState, nonce omitted (CAPABILITY_SPEC.md state machine).");
+
+/**
+ * Sandbox-facing mirror of `SettledPaymentState`, with `nonce` omitted from
+ * the nested capability at every level.
+ *
+ * Hand-written to preserve field-level hover JSDoc; kept in sync with
+ * `publicSettledPaymentStateSchema` by
+ * `_assertPublicSettledPaymentStateShape` below.
+ * @see CAPABILITY_SPEC.md "The payment state machine" — `SETTLED`
+ */
+export interface PublicSettledPaymentState {
+  readonly status: "SETTLED";
+  readonly capability: PublicCapability;
+  /** The SUBMITTED state this SETTLED state transitioned from, nonce omitted. */
+  readonly submittedFrom: PublicSubmittedPaymentState;
+}
+
+/** Compile-time check that `publicSettledPaymentStateSchema` and `PublicSettledPaymentState` stay in sync. */
+function _assertPublicSettledPaymentStateShape(
+  x: z.infer<typeof publicSettledPaymentStateSchema>,
+): PublicSettledPaymentState {
+  return x;
+}
+
+/** Schema for the sandbox-facing RECOVERABLE state; see `PublicRecoverablePaymentState` below for the full doc. */
+export const publicRecoverablePaymentStateSchema = z
+  .object({
+    status: z.literal("RECOVERABLE"),
+    capability: publicCapabilitySchema,
+    submittedFrom: publicSubmittedPaymentStateSchema,
+  })
+  .readonly()
+  .describe("Sandbox-facing RECOVERABLE state: same as RecoverablePaymentState, nonce omitted (CAPABILITY_SPEC.md 'Triggering conditions for RECOVERABLE and FAILED').");
+
+/**
+ * Sandbox-facing mirror of `RecoverablePaymentState`, with `nonce` omitted
+ * from the nested capability at every level.
+ *
+ * Hand-written to preserve field-level hover JSDoc; kept in sync with
+ * `publicRecoverablePaymentStateSchema` by
+ * `_assertPublicRecoverablePaymentStateShape` below.
+ * @see CAPABILITY_SPEC.md "Triggering conditions for `RECOVERABLE` and `FAILED`"
+ */
+export interface PublicRecoverablePaymentState {
+  readonly status: "RECOVERABLE";
+  readonly capability: PublicCapability;
+  /** The SUBMITTED state this RECOVERABLE state transitioned from, nonce omitted. */
+  readonly submittedFrom: PublicSubmittedPaymentState;
+}
+
+/** Compile-time check that `publicRecoverablePaymentStateSchema` and `PublicRecoverablePaymentState` stay in sync. */
+function _assertPublicRecoverablePaymentStateShape(
+  x: z.infer<typeof publicRecoverablePaymentStateSchema>,
+): PublicRecoverablePaymentState {
+  return x;
+}
+
+/** Schema for the sandbox-facing FAILED state; see `PublicFailedPaymentState` below for the full doc. */
+export const publicFailedPaymentStateSchema = z
+  .object({
+    status: z.literal("FAILED"),
+    capability: publicCapabilitySchema,
+    submittedFrom: publicSubmittedPaymentStateSchema,
+  })
+  .readonly()
+  .describe("Sandbox-facing FAILED state: same as FailedPaymentState, nonce omitted (see docs/OPEN_QUESTIONS.md).");
+
+/**
+ * Sandbox-facing mirror of `FailedPaymentState`, with `nonce` omitted from
+ * the nested capability at every level.
+ *
+ * Hand-written to preserve field-level hover JSDoc; kept in sync with
+ * `publicFailedPaymentStateSchema` by
+ * `_assertPublicFailedPaymentStateShape` below.
+ * @see CAPABILITY_SPEC.md "The payment state machine" — `FAILED`
+ */
+export interface PublicFailedPaymentState {
+  readonly status: "FAILED";
+  readonly capability: PublicCapability;
+  /** The SUBMITTED state this FAILED state transitioned from, nonce omitted. */
+  readonly submittedFrom: PublicSubmittedPaymentState;
+}
+
+/** Compile-time check that `publicFailedPaymentStateSchema` and `PublicFailedPaymentState` stay in sync. */
+function _assertPublicFailedPaymentStateShape(
+  x: z.infer<typeof publicFailedPaymentStateSchema>,
+): PublicFailedPaymentState {
+  return x;
+}
+
+/** Schema for the full sandbox-facing payment state machine; see `PublicPaymentState` below for the full doc. */
+export const publicPaymentStateSchema = z.discriminatedUnion("status", [
+  publicIssuedPaymentStateSchema,
+  publicReservedPaymentStateSchema,
+  publicSubmittedPaymentStateSchema,
+  publicSettledPaymentStateSchema,
+  publicRecoverablePaymentStateSchema,
+  publicFailedPaymentStateSchema,
+]);
+
+/**
+ * The sandbox-facing mirror of `PaymentState`: the same discriminated
+ * union on `status`, with `nonce` omitted from every nested capability.
+ * This is what `PayResponse` actually carries — passing a real
+ * `PaymentState` (with `nonce`) through one of `publicXPaymentStateSchema`'s
+ * `.parse()` calls strips the nonce automatically (Zod's default
+ * unknown-key handling drops keys not present in the target shape), which
+ * is the type-level enforcement mechanism: there is no field on this type
+ * for a nonce to occupy.
+ *
+ * Defined as a union of the six hand-written per-state interfaces above,
+ * so it inherits their field-level JSDoc directly and needs no assert
+ * function of its own.
+ * @see CAPABILITY_SPEC.md "The payment state machine"
+ * @see docs/OPEN_QUESTIONS.md "Resolved: nonce omitted from PayResponse via a dedicated public payment-state type"
+ */
+export type PublicPaymentState =
+  | PublicIssuedPaymentState
+  | PublicReservedPaymentState
+  | PublicSubmittedPaymentState
+  | PublicSettledPaymentState
+  | PublicRecoverablePaymentState
+  | PublicFailedPaymentState;
+
+// ---------------------------------------------------------------------------
 // Broker <-> Sandbox protocol
 // ---------------------------------------------------------------------------
 
@@ -928,26 +1281,30 @@ function _assertPayRequestShape(x: z.infer<typeof payRequestSchema>): PayRequest
 /** Schema for the sandbox's payment tool call response; see the `PayResponse` type below for the full doc. */
 export const payResponseSchema = z
   .object({
-    state: paymentStateSchema,
+    state: publicPaymentStateSchema,
   })
   .readonly()
-  .describe("The resulting payment state after the Broker processed a PayRequest.");
+  .describe("The resulting payment state (nonce omitted) after the Broker processed a PayRequest.");
 
 /**
  * Response shape for the sandbox's single payment tool call: the resulting
  * payment state after the Broker processed the request.
  *
- * This shape is provisional pending task 0.4 (Broker<->Sandbox wire
- * protocol, including error codes and response envelope), which has not been
- * completed yet per docs/TASKS.md.
+ * Deliberately typed as `PublicPaymentState`, not `PaymentState`: the
+ * sandbox must never receive `nonce` (docs/OPEN_QUESTIONS.md "Resolved:
+ * capability_id vs. nonce"), and using the nonce-omitted type here makes
+ * that a structural, compile-time guarantee rather than something an
+ * implementation has to remember to strip at the HTTP boundary.
  *
  * Hand-written to preserve field-level hover JSDoc; kept in sync with
  * `payResponseSchema` by `_assertPayResponseShape` below.
+ * @see docs/PROTOCOL.md §3 "Response shape — success"
  * @see ARCHITECTURE.md "Broker↔Sandbox protocol" (`packages/protocol`)
+ * @see docs/OPEN_QUESTIONS.md "Resolved: nonce omitted from PayResponse via a dedicated public payment-state type"
  */
 export interface PayResponse {
-  /** The resulting payment state after the Broker processed the request. */
-  readonly state: PaymentState;
+  /** The resulting payment state after the Broker processed the request, nonce omitted. */
+  readonly state: PublicPaymentState;
 }
 
 /** Compile-time check that `payResponseSchema` and `PayResponse` stay in sync. */
@@ -1111,6 +1468,8 @@ function _assertAuthorizationFailureReasonShape(
 const authorizationSucceededSchema = z
   .object({
     authorized: z.literal(true),
+    /** The reservation this successful authorization produced. */
+    state: reservedPaymentStateSchema,
   })
   .readonly();
 
@@ -1134,12 +1493,25 @@ export const authorizationResultSchema = z.discriminatedUnion("authorized", [
  * authorization — SECURITY_INVARIANT.md is explicit that "If any conjunct is
  * false, the Broker must not authorize the payment."
  *
+ * On success, carries the `ReservedPaymentState` that authorization
+ * actually produced: clauses 7-9 (replay, stale nonce, over-budget) are
+ * enforced by performing the atomic `RESERVED` transition itself
+ * (CAPABILITY_SPEC.md "Atomicity note") — a successful `authorize()` call
+ * has already burned the nonce and reserved the budget, so the resulting
+ * `ReservedPaymentState` is real, produced state, not something a caller
+ * should have to reconstruct from a second lookup.
+ *
  * Hand-written to preserve field-level hover JSDoc; kept in sync with
  * `authorizationResultSchema` by `_assertAuthorizationResultShape` below.
  * @see SECURITY_INVARIANT.md "The invariant"
+ * @see CAPABILITY_SPEC.md "The payment state machine" — `RESERVED`
  */
 export type AuthorizationResult =
-  | Readonly<{ authorized: true }>
+  | Readonly<{
+      authorized: true;
+      /** The reservation this successful authorization produced. */
+      state: ReservedPaymentState;
+    }>
   | Readonly<{
       authorized: false;
       /** Which single invariant clause failed. */
