@@ -85,7 +85,17 @@ importers:
         specifier: ^8.0.16
         version: 8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(tsx@4.23.13)
 
-  apps/sandbox: {}
+  apps/sandbox:
+    devDependencies:
+      '@types/node':
+        specifier: ^26.4.1
+        version: 26.4.1
+      tsx:
+        specifier: ^4.23.13
+        version: 4.23.13
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
 
   packages/capability-spec:
     dependencies:
