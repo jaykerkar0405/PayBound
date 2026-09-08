@@ -10,18 +10,14 @@ const SANDBOX_DIR = resolve(__dirname, "../..");
 describe("Agent Sandbox Scaffolding & Runtime Isolation (Task 2.1)", () => {
   beforeAll(() => {
     // Build the Docker image from apps/sandbox with generous timeout
-    const buildResult = spawnSync(
-      "docker",
-      ["build", "-t", IMAGE_TAG, SANDBOX_DIR],
-      {
-        encoding: "utf-8",
-        timeout: 120_000,
-      }
-    );
+    const buildResult = spawnSync("docker", ["build", "-t", IMAGE_TAG, SANDBOX_DIR], {
+      encoding: "utf-8",
+      timeout: 120_000,
+    });
 
     if (buildResult.status !== 0) {
       throw new Error(
-        `Failed to build Docker image:\nSTDOUT: ${buildResult.stdout}\nSTDERR: ${buildResult.stderr}`
+        `Failed to build Docker image:\nSTDOUT: ${buildResult.stdout}\nSTDERR: ${buildResult.stderr}`,
       );
     }
     expect(buildResult.status).toBe(0);
@@ -34,29 +30,18 @@ describe("Agent Sandbox Scaffolding & Runtime Isolation (Task 2.1)", () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain(
-      "PayBound Agent Sandbox started (network isolated)"
-    );
+    expect(result.stdout).toContain("PayBound Agent Sandbox started (network isolated)");
   });
 
   it("blocks outbound network access by default (no network flags provided)", () => {
     // Attempting an outbound HTTP request without --network flags must fail/time out
     const curlResult = spawnSync(
       "docker",
-      [
-        "run",
-        "--rm",
-        IMAGE_TAG,
-        "curl",
-        "-sSf",
-        "--connect-timeout",
-        "3",
-        "https://example.com",
-      ],
+      ["run", "--rm", IMAGE_TAG, "curl", "-sSf", "--connect-timeout", "3", "https://example.com"],
       {
         encoding: "utf-8",
         timeout: 15_000,
-      }
+      },
     );
 
     // Command must fail with non-zero exit code due to DNS resolution failure or network drop
@@ -77,7 +62,7 @@ describe("Agent Sandbox Scaffolding & Runtime Isolation (Task 2.1)", () => {
       {
         encoding: "utf-8",
         timeout: 15_000,
-      }
+      },
     );
 
     expect(nodeResult.status).not.toBe(0);
@@ -101,7 +86,7 @@ describe("Agent Sandbox Scaffolding & Runtime Isolation (Task 2.1)", () => {
       {
         encoding: "utf-8",
         timeout: 15_000,
-      }
+      },
     );
 
     expect(curlResult.status).not.toBe(0);
