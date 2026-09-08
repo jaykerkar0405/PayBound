@@ -16,6 +16,10 @@ import { getCapabilityIdByNonce, reservePayment } from "./state-machine.js";
  * Clauses 7-9 (replay, stale nonce, over-budget) are inherently tied to the
  * atomic RESERVED transition (CAPABILITY_SPEC.md) and are delegated to
  * state-machine.ts's reservePayment, only once clauses 1-6 have all passed.
+ * On success, the real ReservedPaymentState reservePayment produced is
+ * returned as part of AuthorizationResult (packages/types) rather than
+ * discarded — callers (e.g. the pay() route, task 1.7) use it directly
+ * instead of reconstructing an equivalent value from a second lookup.
  */
 export function authorize(input: AuthorizePaymentInput): AuthorizationResult {
   const { payment, capability, task } = input;
@@ -49,5 +53,5 @@ export function authorize(input: AuthorizePaymentInput): AuthorizationResult {
     return { authorized: false, reason: reservation.reason };
   }
 
-  return { authorized: true };
+  return { authorized: true, state: reservation.state };
 }
