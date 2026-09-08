@@ -20,12 +20,15 @@ WORKDIR /build/apps/sandbox
 RUN mkdir -p /build && \
     echo '{"compilerOptions":{"target":"ES2023","module":"NodeNext","moduleResolution":"NodeNext","lib":["ES2023"],"strict":true,"skipLibCheck":true}}' > /build/tsconfig.base.json
 
-COPY package.json tsconfig.json tsconfig.build.json ./
-COPY src ./src
+COPY . ./
 
-# Build TypeScript to compiled JavaScript in dist/
-RUN npm install --no-package-lock typescript@^6.0.3 @types/node@^26.4.1 && \
-    ./node_modules/.bin/tsc -p tsconfig.build.json
+# Build TypeScript to compiled JavaScript in dist/ if not already pre-built
+RUN if [ ! -f "dist/index.js" ]; then \
+      sed -i '/"workspace:/d' package.json && \
+      npm install --no-package-lock typescript@^6.0.3 @types/node@^26.4.1 && \
+      echo '{"extends":"/build/tsconfig.base.json","compilerOptions":{"outDir":"dist","rootDir":"src","types":["node"]},"include":["src/index.ts","src/config.ts","src/attestation.ts"]}' > tsconfig.entrypoint.json && \
+      ./node_modules/.bin/tsc -p tsconfig.entrypoint.json; \
+    fi
 
 # Runner stage: minimal production container
 FROM node:24-alpine
