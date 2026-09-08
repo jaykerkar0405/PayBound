@@ -2,26 +2,32 @@
 set -e
 
 # ==============================================================================
-# PayBound Agent Sandbox — Default Network Isolation Entrypoint (Task 2.1)
+# PayBound Agent Sandbox — Container Entrypoint (Task 2.1 / 2.2)
 # ==============================================================================
-# In Task 2.1, the sandbox container enforces a zero-network-access baseline:
-# 1. DNS resolution is disabled by truncating /etc/resolv.conf so outbound lookups fail.
-# 2. If CAP_NET_ADMIN is available, iptables OUTPUT policy is set to DROP (loopback allowed).
-# 3. Running with `--network none` provides airtight kernel-level network namespace isolation.
-# In Task 2.2, apps/sandbox/network/egress-policy.sh will carve out specific exceptions
-# (allowing public web access while blocking payment infrastructure except the Broker channel).
+# In Task 2.2, apps/sandbox/network/egress-policy.sh is wired to run automatically
+# at container startup before application code runs.
+# It enforces:
+# 1. Outbound public web access (HTTP/HTTPS, DNS).
+# 2. Complete block of host/gateway network (payment infrastructure stand-ins).
+# 3. Single explicit exception: Broker channel ($BROKER_HOST:$BROKER_PORT).
+# 4. If CAP_NET_ADMIN is absent, maintains zero-network baseline (fails closed).
 # ==============================================================================
 
-# Disable DNS resolution inside container
-if [ -w /etc/resolv.conf ]; then
-  > /etc/resolv.conf
-fi
-
-# Apply iptables outbound drop if network admin capability is granted
-if command -v iptables >/dev/null 2>&1; then
-  iptables -P OUTPUT DROP 2>/dev/null || true
-  iptables -P FORWARD DROP 2>/dev/null || true
-  iptables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
+# Apply egress policy automatically at startup if present
+if [ -f /app/network/egress-policy.sh ]; then
+  /app/network/egress-policy.sh
+elif [ -f ./network/egress-policy.sh ]; then
+  ./network/egress-policy.sh
+else
+  # Fallback to Task 2.1 default posture: strip DNS resolution
+  if [ -w /etc/resolv.conf ]; then
+    > /etc/resolv.conf
+  fi
+  if command -v iptables >/dev/null 2>&1; then
+    iptables -P OUTPUT DROP 2>/dev/null || true
+    iptables -P FORWARD DROP 2>/dev/null || true
+    iptables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
+  fi
 fi
 
 # If a command was supplied (e.g. via `docker run ... <cmd>`), execute it.
@@ -31,4 +37,3 @@ if [ $# -gt 0 ]; then
 else
   exec node dist/index.js
 fi
-
