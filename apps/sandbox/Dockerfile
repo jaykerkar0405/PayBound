@@ -1,16 +1,14 @@
 # ==============================================================================
-# PayBound Agent Sandbox — Container Runtime (Task 2.1)
+# PayBound Agent Sandbox — Container Runtime (Task 2.1 / 2.2)
 # ==============================================================================
 # Docker is the decided isolation mechanism for Phase 2 (see docs/TECH_STACK_ADR.md).
-# This image provides the network-isolated baseline runtime for the adversarial domain.
+# This image provides the network-isolated runtime for the adversarial domain.
 #
-# Default Network Posture:
-# - Zero outbound network access by default.
-# - The entrypoint script strips DNS resolution (/etc/resolv.conf) and applies
-#   iptables OUTPUT DROP (with loopback accepted) when CAP_NET_ADMIN is granted.
-# - Running with `--network none` provides full kernel-level namespace isolation.
-# - Phase 2 Task 2.2 builds on this baseline by carving out selective exceptions
-#   (allowing web access while blocking payment infrastructure).
+# Egress Policy Posture (Task 2.2):
+# - Outbound public web (HTTP/HTTPS, DNS) is allowed so agent can read untrusted content.
+# - Host gateway and internal payment infrastructure routes are blocked.
+# - The designated Broker channel ($BROKER_HOST:$BROKER_PORT) is explicitly allowed.
+# - Egress policy is applied automatically at container startup via network/egress-policy.sh.
 # ==============================================================================
 
 # Build stage: compile TypeScript application
@@ -29,11 +27,10 @@ COPY src ./src
 RUN npm install --no-package-lock typescript@^6.0.3 @types/node@^26.4.1 && \
     ./node_modules/.bin/tsc -p tsconfig.build.json
 
-
 # Runner stage: minimal production container
 FROM node:24-alpine
 
-# Install curl and iptables for network testing and egress policy scaffolding
+# Install curl and iptables for network testing and egress policy enforcement
 RUN apk add --no-cache curl iptables
 
 WORKDIR /app
@@ -42,8 +39,9 @@ WORKDIR /app
 COPY --from=builder /build/apps/sandbox/dist ./dist
 COPY package.json ./
 COPY entrypoint.sh ./entrypoint.sh
+COPY network ./network
 
-RUN chmod +x ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh ./network/egress-policy.sh
 
 # Run compiled JS by default via network-isolating entrypoint
 ENTRYPOINT ["/app/entrypoint.sh"]
