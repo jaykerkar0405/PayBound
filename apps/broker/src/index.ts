@@ -4,6 +4,7 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { config } from "./config.js";
 import "./db.js";
+import { payRoute } from "./routes/pay.js";
 
 const app = new Hono();
 
@@ -19,6 +20,8 @@ app.get("/health", zValidator("query", healthQuerySchema), (c) => {
       : { status: "ok" };
   return c.json(body);
 });
+
+app.route("/pay", payRoute);
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`broker listening on http://localhost:${info.port}`);
