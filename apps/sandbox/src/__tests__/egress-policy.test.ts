@@ -49,8 +49,8 @@ describe("Sandbox Network Egress Policy (Task 2.2)", () => {
 
   afterAll(async () => {
     await Promise.all([
-      new Promise<void>((r) => brokerServer.close(() => r())),
-      new Promise<void>((r) => paymentServer.close(() => r())),
+      new Promise<void>((r) => (brokerServer ? brokerServer.close(() => r()) : r())),
+      new Promise<void>((r) => (paymentServer ? paymentServer.close(() => r()) : r())),
     ]);
   });
 
