@@ -30,12 +30,12 @@ for `RECOVERABLE` and `FAILED`") happens asynchronously on the Broker's
 side, independent of this call having already returned.
 
 This is deliberate, not an oversight: dispatching a signed transaction to
-Hedera is fast; *waiting for network confirmation of it* is not, and its
+Hedera is fast; _waiting for network confirmation of it_ is not, and its
 latency is outside the Broker's control. The agent's payment tool call
 resolves quickly regardless of Hedera settlement latency — the sandbox is
 never left blocked on consensus finality. This is also the only model under
 which `RECOVERABLE` makes sense as a state at all: `RECOVERABLE` represents
-an *unknown* settlement outcome (timeout, connection failure, no
+an _unknown_ settlement outcome (timeout, connection failure, no
 confirmation received) that can only arise because settlement finality is
 inherently decoupled from the request/response cycle that produced
 `SUBMITTED` in the first place. If settlement were synchronous, there would
@@ -79,7 +79,7 @@ assumed the call's synchronous response would carry a `ReservedPaymentState`
 (reasoning that the call blocks "through... reservation... signing," and
 treating reservation and signing as separate stopping points). That doesn't
 match `CAPABILITY_SPEC.md`'s actual definition: signing is not a separate
-transition — it happens *as part of* the `RESERVED -> SUBMITTED` transition
+transition — it happens _as part of_ the `RESERVED -> SUBMITTED` transition
 ("the Broker has constructed and signed the canonical payment request and
 submitted it for settlement"). Since §1 above establishes that this call
 blocks through signing, it necessarily blocks through the transition into
@@ -146,7 +146,7 @@ result, versus only being used for logging/audit purposes (e.g. an HCS
 entry), is a separate decision for Phase 2 (sandbox/agent loop
 implementation, tasks 2.4–2.5) to make. There are real arguments either way
 (precise feedback could help a legitimate retry; but a rejected agent
-learning *why* — "wrong destination" vs. "wrong resource" — could also hand
+learning _why_ — "wrong destination" vs. "wrong resource" — could also hand
 an adversarial context a diagnostic signal about what the Broker is
 checking). This document only specifies what the Broker returns on the
 wire; what the sandbox does with it before it (if at all) reaches the
@@ -162,23 +162,26 @@ authorize any individual payment. Only a valid capability does that
 equality check is one of the 9 invariant clauses, not a substitute for
 `Broker.authorize` as a whole).
 
-At the level this protocol can specify today, the channel handshake needs to
-convey two things:
+The channel handshake implements two concrete requirements (resolved in task 2.3):
 
 1. **Identity** — which sandbox workload this is, matching the `session`
    (`PublicKey`, per `packages/types`) that will be embedded in any
    capability issued for it.
+   - _Mechanism:_ At sandbox startup, prior to reading any untrusted content,
+     the sandbox generates an ephemeral Ed25519 keypair in memory. The public
+     key (SPKI DER format, hex-encoded) is exported as the `session` / `PublicKey`
+     value. The private key remains strictly in-memory only (never logged or
+     persisted to disk).
 2. **Freshness / non-replay of the attestation itself** — proof that this
    is a live presentation of that identity, established before the agent
    was exposed to any untrusted content (per `THREAT_MODEL.md`), not a
    replayed attestation artifact from a previous or different session.
-
-**What this document does not specify:** the concrete attestation mechanism
-(e.g. a container ID plus a signed boot nonce, as discussed during tech
-stack decisions) is not yet decided. Describing implementation specifics
-here would mean guessing at a decision nobody has made — instead, the open
-question is tracked explicitly in `docs/OPEN_QUESTIONS.md` rather than
-resolved by assumption.
+   - _Mechanism:_ Challenge-response handshake. The Broker (or verifier) issues
+     a single-use, high-entropy random challenge string. The sandbox signs the
+     challenge with its in-memory Ed25519 private key and returns the proof
+     `{ publicKey, challenge, signature }`. The Broker verifies the signature
+     against `publicKey` and confirms that `challenge` matches the issued
+     nonce, proving live possession and preventing replay.
 
 ## 6. Error handling for malformed or unresolvable requests
 
@@ -200,7 +203,7 @@ request that never gets that far — the two are handled differently:
 - **Well-formed but unknown `capabilityId`** (valid shape, but no matching
   capability exists in the Broker's records — e.g. already consumed and
   since garbage-collected, never issued, or simply wrong): **`404 Not
-  Found`**. Body shape:
+Found`**. Body shape:
 
   ```json
   { "error": "capability_not_found", "capabilityId": "..." }
@@ -210,8 +213,8 @@ request that never gets that far — the two are handled differently:
   body per §4 above (`{ "authorized": false, "reason": "..." }`).
 
 **Why the split, and why 200 for a genuine authorization failure:** a
-malformed or unresolvable request never reached the point of being *a
-decision about a real payment* — there was nothing valid to decide on, so
+malformed or unresolvable request never reached the point of being _a
+decision about a real payment_ — there was nothing valid to decide on, so
 it's a protocol-level error (4xx), consistent with Hono/HTTP convention
 (the request itself was invalid, or its target doesn't exist). A rejected
 authorization is different: the request was well-formed, the capability was
