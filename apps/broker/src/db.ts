@@ -11,5 +11,10 @@ import { config } from "./config.js";
  */
 export const db: Database.Database = new Database(config.dbPath);
 
+// Set first: wait for a locked connection to free up (e.g. concurrent
+// Vitest worker threads opening/writing to the same file at startup)
+// instead of throwing SQLITE_BUSY immediately — including during the
+// journal_mode switch itself, which briefly needs exclusive access.
+db.pragma("busy_timeout = 5000");
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
