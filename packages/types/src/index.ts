@@ -370,14 +370,22 @@ function _assertCapabilityShape(x: z.infer<typeof capabilitySchema>): Capability
 export const publicCapabilitySchema = capabilityObjectSchema.omit({ nonce: true }).readonly();
 
 /**
- * `Capability` with `nonce` omitted — the shape actually safe to put on
- * the sandbox-facing wire (see `PublicPaymentState`/`PayResponse` below).
+ * `Capability` with `nonce` omitted. `nonce` is the Broker's internal
+ * replay-defense token, burned atomically at the `RESERVED` transition
+ * (CAPABILITY_SPEC.md "Atomicity note") — it must never reach the
+ * untrusted sandbox/agent domain (THREAT_MODEL.md's trust boundary;
+ * docs/OPEN_QUESTIONS.md "Resolved: capability_id vs. nonce" — "the
+ * sandbox never sees or handles it"). This is the shape actually safe to
+ * put on the sandbox-facing wire (see `PublicPaymentState`/`PayResponse`
+ * below).
  *
  * Hand-written (rather than `Omit<Capability, "nonce">`) to preserve
  * field-level hover JSDoc, following this file's established pattern;
  * kept in sync with `publicCapabilitySchema` by
  * `_assertPublicCapabilityShape` below.
  * @see CAPABILITY_SPEC.md "The `Capability` object"
+ * @see THREAT_MODEL.md "Adversarial" (trust boundary)
+ * @see docs/OPEN_QUESTIONS.md "Resolved: capability_id vs. nonce"
  */
 export interface PublicCapability {
   /**
@@ -982,13 +990,18 @@ export const publicIssuedPaymentStateSchema = z
   .describe("Sandbox-facing ISSUED state: same as IssuedPaymentState, nonce omitted (CAPABILITY_SPEC.md state machine).");
 
 /**
- * Sandbox-facing mirror of `IssuedPaymentState`, with `nonce` omitted from
- * the nested capability.
+ * Sandbox-facing mirror of `IssuedPaymentState`. Its nested capability is
+ * `PublicCapability`, not `Capability`: `nonce` is the Broker's internal
+ * replay-defense token and must never reach the untrusted sandbox/agent
+ * domain (THREAT_MODEL.md trust boundary; docs/OPEN_QUESTIONS.md
+ * "Resolved: capability_id vs. nonce" — "the sandbox never sees or
+ * handles it"), so this type has no field for one to occupy.
  *
  * Hand-written to preserve field-level hover JSDoc; kept in sync with
  * `publicIssuedPaymentStateSchema` by
  * `_assertPublicIssuedPaymentStateShape` below.
  * @see CAPABILITY_SPEC.md "The payment state machine" — `ISSUED`
+ * @see docs/OPEN_QUESTIONS.md "Resolved: nonce omitted from PayResponse via a dedicated public payment-state type"
  */
 export interface PublicIssuedPaymentState {
   readonly status: "ISSUED";
@@ -1014,13 +1027,20 @@ export const publicReservedPaymentStateSchema = z
   .describe("Sandbox-facing RESERVED state: same as ReservedPaymentState, nonce omitted (CAPABILITY_SPEC.md state machine).");
 
 /**
- * Sandbox-facing mirror of `ReservedPaymentState`, with `nonce` omitted
- * from the nested capability at every level.
+ * Sandbox-facing mirror of `ReservedPaymentState`. Its nested capabilities
+ * — `capability`, and transitively `issuedFrom.capability` — are
+ * `PublicCapability`, not `Capability`: `nonce` is the Broker's internal
+ * replay-defense token and must never reach the untrusted sandbox/agent
+ * domain (THREAT_MODEL.md trust boundary; docs/OPEN_QUESTIONS.md
+ * "Resolved: capability_id vs. nonce" — "the sandbox never sees or
+ * handles it"), so this type has no field for one to occupy at any
+ * nesting level.
  *
  * Hand-written to preserve field-level hover JSDoc; kept in sync with
  * `publicReservedPaymentStateSchema` by
  * `_assertPublicReservedPaymentStateShape` below.
  * @see CAPABILITY_SPEC.md "The payment state machine" — `RESERVED`
+ * @see docs/OPEN_QUESTIONS.md "Resolved: nonce omitted from PayResponse via a dedicated public payment-state type"
  */
 export interface PublicReservedPaymentState {
   readonly status: "RESERVED";
@@ -1047,14 +1067,25 @@ export const publicSubmittedPaymentStateSchema = z
   .describe("Sandbox-facing SUBMITTED state: same as SubmittedPaymentState, nonce omitted (CAPABILITY_SPEC.md state machine).");
 
 /**
- * Sandbox-facing mirror of `SubmittedPaymentState`, with `nonce` omitted
- * from the nested capability at every level. This is the shape `PayResponse`
- * actually carries on a successful `pay()` call (docs/PROTOCOL.md §3).
+ * Sandbox-facing mirror of `SubmittedPaymentState` — the shape
+ * `PayResponse` actually carries on a successful `pay()` call
+ * (docs/PROTOCOL.md §3). Its nested capabilities, at every level
+ * (`capability`, `reservedFrom.capability`,
+ * `reservedFrom.issuedFrom.capability`), are `PublicCapability`, not
+ * `Capability`: `nonce` is the Broker's internal replay-defense token and
+ * must never reach the untrusted sandbox/agent domain (THREAT_MODEL.md
+ * trust boundary; docs/OPEN_QUESTIONS.md "Resolved: capability_id vs.
+ * nonce" — "the sandbox never sees or handles it"). Using this type for
+ * `PayResponse.state` is what makes that a structural, compile-time
+ * guarantee rather than something the `pay()` route has to remember to
+ * strip at the HTTP boundary.
  *
  * Hand-written to preserve field-level hover JSDoc; kept in sync with
  * `publicSubmittedPaymentStateSchema` by
  * `_assertPublicSubmittedPaymentStateShape` below.
  * @see CAPABILITY_SPEC.md "The payment state machine" — `SUBMITTED`
+ * @see docs/PROTOCOL.md §3 "Response shape — success"
+ * @see docs/OPEN_QUESTIONS.md "Resolved: nonce omitted from PayResponse via a dedicated public payment-state type"
  */
 export interface PublicSubmittedPaymentState {
   readonly status: "SUBMITTED";
@@ -1081,13 +1112,19 @@ export const publicSettledPaymentStateSchema = z
   .describe("Sandbox-facing SETTLED state: same as SettledPaymentState, nonce omitted (CAPABILITY_SPEC.md state machine).");
 
 /**
- * Sandbox-facing mirror of `SettledPaymentState`, with `nonce` omitted from
- * the nested capability at every level.
+ * Sandbox-facing mirror of `SettledPaymentState`. Its nested capabilities,
+ * at every level, are `PublicCapability`, not `Capability`: `nonce` is the
+ * Broker's internal replay-defense token and must never reach the
+ * untrusted sandbox/agent domain (THREAT_MODEL.md trust boundary;
+ * docs/OPEN_QUESTIONS.md "Resolved: capability_id vs. nonce" — "the
+ * sandbox never sees or handles it"), so this type has no field for one to
+ * occupy at any nesting level.
  *
  * Hand-written to preserve field-level hover JSDoc; kept in sync with
  * `publicSettledPaymentStateSchema` by
  * `_assertPublicSettledPaymentStateShape` below.
  * @see CAPABILITY_SPEC.md "The payment state machine" — `SETTLED`
+ * @see docs/OPEN_QUESTIONS.md "Resolved: nonce omitted from PayResponse via a dedicated public payment-state type"
  */
 export interface PublicSettledPaymentState {
   readonly status: "SETTLED";
@@ -1114,13 +1151,19 @@ export const publicRecoverablePaymentStateSchema = z
   .describe("Sandbox-facing RECOVERABLE state: same as RecoverablePaymentState, nonce omitted (CAPABILITY_SPEC.md 'Triggering conditions for RECOVERABLE and FAILED').");
 
 /**
- * Sandbox-facing mirror of `RecoverablePaymentState`, with `nonce` omitted
- * from the nested capability at every level.
+ * Sandbox-facing mirror of `RecoverablePaymentState`. Its nested
+ * capabilities, at every level, are `PublicCapability`, not `Capability`:
+ * `nonce` is the Broker's internal replay-defense token and must never
+ * reach the untrusted sandbox/agent domain (THREAT_MODEL.md trust
+ * boundary; docs/OPEN_QUESTIONS.md "Resolved: capability_id vs. nonce" —
+ * "the sandbox never sees or handles it"), so this type has no field for
+ * one to occupy at any nesting level.
  *
  * Hand-written to preserve field-level hover JSDoc; kept in sync with
  * `publicRecoverablePaymentStateSchema` by
  * `_assertPublicRecoverablePaymentStateShape` below.
  * @see CAPABILITY_SPEC.md "Triggering conditions for `RECOVERABLE` and `FAILED`"
+ * @see docs/OPEN_QUESTIONS.md "Resolved: nonce omitted from PayResponse via a dedicated public payment-state type"
  */
 export interface PublicRecoverablePaymentState {
   readonly status: "RECOVERABLE";
@@ -1147,13 +1190,19 @@ export const publicFailedPaymentStateSchema = z
   .describe("Sandbox-facing FAILED state: same as FailedPaymentState, nonce omitted (see docs/OPEN_QUESTIONS.md).");
 
 /**
- * Sandbox-facing mirror of `FailedPaymentState`, with `nonce` omitted from
- * the nested capability at every level.
+ * Sandbox-facing mirror of `FailedPaymentState`. Its nested capabilities,
+ * at every level, are `PublicCapability`, not `Capability`: `nonce` is the
+ * Broker's internal replay-defense token and must never reach the
+ * untrusted sandbox/agent domain (THREAT_MODEL.md trust boundary;
+ * docs/OPEN_QUESTIONS.md "Resolved: capability_id vs. nonce" — "the
+ * sandbox never sees or handles it"), so this type has no field for one to
+ * occupy at any nesting level.
  *
  * Hand-written to preserve field-level hover JSDoc; kept in sync with
  * `publicFailedPaymentStateSchema` by
  * `_assertPublicFailedPaymentStateShape` below.
  * @see CAPABILITY_SPEC.md "The payment state machine" — `FAILED`
+ * @see docs/OPEN_QUESTIONS.md "Resolved: nonce omitted from PayResponse via a dedicated public payment-state type"
  */
 export interface PublicFailedPaymentState {
   readonly status: "FAILED";
@@ -1182,17 +1231,22 @@ export const publicPaymentStateSchema = z.discriminatedUnion("status", [
 /**
  * The sandbox-facing mirror of `PaymentState`: the same discriminated
  * union on `status`, with `nonce` omitted from every nested capability.
- * This is what `PayResponse` actually carries — passing a real
- * `PaymentState` (with `nonce`) through one of `publicXPaymentStateSchema`'s
- * `.parse()` calls strips the nonce automatically (Zod's default
- * unknown-key handling drops keys not present in the target shape), which
- * is the type-level enforcement mechanism: there is no field on this type
- * for a nonce to occupy.
+ * `nonce` is the Broker's internal replay-defense token and must never
+ * reach the untrusted sandbox/agent domain (THREAT_MODEL.md trust
+ * boundary; docs/OPEN_QUESTIONS.md "Resolved: capability_id vs. nonce" —
+ * "the sandbox never sees or handles it"). This is what `PayResponse`
+ * actually carries — passing a real `PaymentState` (with `nonce`) through
+ * one of `publicXPaymentStateSchema`'s `.parse()` calls strips the nonce
+ * automatically (Zod's default unknown-key handling drops keys not
+ * present in the target shape), which is the type-level enforcement
+ * mechanism: there is no field on this type for a nonce to occupy.
  *
  * Defined as a union of the six hand-written per-state interfaces above,
  * so it inherits their field-level JSDoc directly and needs no assert
  * function of its own.
  * @see CAPABILITY_SPEC.md "The payment state machine"
+ * @see THREAT_MODEL.md "Adversarial" (trust boundary)
+ * @see docs/OPEN_QUESTIONS.md "Resolved: capability_id vs. nonce"
  * @see docs/OPEN_QUESTIONS.md "Resolved: nonce omitted from PayResponse via a dedicated public payment-state type"
  */
 export type PublicPaymentState =
