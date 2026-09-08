@@ -88,7 +88,7 @@ signs payments.
 Can start scaffolding in parallel with Phase 1 (2.1–2.2), but real integration
 needs the broker's `pay()` endpoint (1.7).
 
-- [ ] **2.1** Scaffold the agent sandbox runtime (whatever isolation mechanism is
+- [x] **2.1** Scaffold the agent sandbox runtime (whatever isolation mechanism is
       chosen — container, microVM, etc.) with no network access by default.
       Depends on 0.5. *(Sandbox)*
 - [ ] **2.2** Implement sandbox network egress policy: allow outbound to
