@@ -2,6 +2,8 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
+import { config } from "./config.js";
+import "./db.js";
 
 const app = new Hono();
 
@@ -18,9 +20,7 @@ app.get("/health", zValidator("query", healthQuerySchema), (c) => {
   return c.json(body);
 });
 
-const port = Number(process.env.PORT ?? 3000);
-
-serve({ fetch: app.fetch, port }, (info) => {
+serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`broker listening on http://localhost:${info.port}`);
 });
 
