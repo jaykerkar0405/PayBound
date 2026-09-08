@@ -101,7 +101,7 @@ needs the broker's `pay()` endpoint (1.7).
 - [x] **2.4** Implement the agent's payment tool: exactly one parameter
       (`capability_id`), no destination/amount fields, calling the broker's
       `pay()` endpoint from 1.7. Depends on 2.3, 1.7. *(Sandbox)*
-- [ ] **2.5** Wire up a minimal agent loop (LLM + tool-use) that can read
+- [x] **2.5** Wire up a minimal agent loop (LLM + tool-use) that can read
       untrusted content and invoke the payment tool, with the capability issued
       by the trusted task definer *before* untrusted content is read. Depends
       on 2.4. *(Sandbox)*
