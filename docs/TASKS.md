@@ -144,7 +144,12 @@ can start once 1.7 exists.
       logic — a definitive negative result goes straight to `FAILED`, but an
       unknown outcome (timeout, connection failure, broker crash mid-flight)
       must be reconciled against Hedera before resolving to `SETTLED` or
-      `FAILED`. Depends on 4.1, 1.5. *(Settlement)*
+      `FAILED`. `resolveSubmission(submitted, outcome)` in
+      `apps/broker/src/state-machine.ts` (task 1.5) already implements the
+      state-transition mapping — this task's job is determining the real
+      outcome value (`'settled' | 'failed' | 'unknown'`) via Hedera
+      reconciliation and calling `resolveSubmission()` with it, not building
+      the state machine itself. Depends on 4.1, 1.5. *(Settlement)*
 
 ## Phase 5 — Optional Confidential Policy Check (Chainlink CRE)
 
