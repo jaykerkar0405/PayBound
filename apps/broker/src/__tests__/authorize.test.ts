@@ -114,7 +114,12 @@ describe("authorize", () => {
   it("replay: reusing an already-consumed capability -> REPLAY", () => {
     const { capability, task, validPayment } = setUp();
 
-    expect(authorize({ payment: validPayment, capability, task })).toEqual({ authorized: true });
+    const first = authorize({ payment: validPayment, capability, task });
+    expect(first.authorized).toBe(true);
+    if (first.authorized) {
+      expect(first.state.status).toBe("RESERVED");
+    }
+
     expect(authorize({ payment: validPayment, capability, task })).toEqual({
       authorized: false,
       reason: "REPLAY",
@@ -143,10 +148,17 @@ describe("authorize", () => {
     });
   });
 
-  it("a fully valid payment is authorized", () => {
+  it("a fully valid payment is authorized, returning the real ReservedPaymentState", () => {
     const { capability, task, validPayment } = setUp();
 
-    expect(authorize({ payment: validPayment, capability, task })).toEqual({ authorized: true });
+    const result = authorize({ payment: validPayment, capability, task });
+
+    expect(result.authorized).toBe(true);
+    if (result.authorized) {
+      expect(result.state.status).toBe("RESERVED");
+      expect(result.state.issuedFrom.status).toBe("ISSUED");
+      expect(result.state.capability.taskHash).toBe(capability.taskHash);
+    }
   });
 
   it("deterministically reports the higher-precedence clause when multiple are violated", () => {
