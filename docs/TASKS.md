@@ -91,7 +91,7 @@ needs the broker's `pay()` endpoint (1.7).
 - [x] **2.1** Scaffold the agent sandbox runtime (whatever isolation mechanism is
       chosen — container, microVM, etc.) with no network access by default.
       Depends on 0.5. *(Sandbox)*
-- [ ] **2.2** Implement sandbox network egress policy: allow outbound to
+- [x] **2.2** Implement sandbox network egress policy: allow outbound to
       arbitrary untrusted content (web, docs, tool APIs) but block every route
       to payment infrastructure except the single authenticated Broker channel.
       Depends on 2.1. *(Sandbox)*
