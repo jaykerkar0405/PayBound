@@ -6,4 +6,3 @@ export default defineProject({
     hookTimeout: 120_000,
   },
 });
-
