@@ -105,7 +105,7 @@ needs the broker's `pay()` endpoint (1.7).
       untrusted content and invoke the payment tool, with the capability issued
       by the trusted task definer *before* untrusted content is read. Depends
       on 2.4. *(Sandbox)*
-- [ ] **2.6** Build attack scenario 1: prompt injection attempting to redirect
+- [x] **2.6** Build attack scenario 1: prompt injection attempting to redirect
       payment destination/amount (should fail structurally — no field exists).
       Depends on 2.5. *(Sandbox)*
 - [ ] **2.7** Build attack scenario 2: injected instruction attempting to make
