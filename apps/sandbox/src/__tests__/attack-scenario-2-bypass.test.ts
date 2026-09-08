@@ -101,7 +101,7 @@ function createMockModel(
   });
 }
 
-function createLegitimateSubmittedState(capabilityId: CapabilityId): PublicSubmittedPaymentState {
+function createLegitimateSubmittedState(_capabilityId: CapabilityId): PublicSubmittedPaymentState {
   return {
     status: "SUBMITTED",
     capability: {
