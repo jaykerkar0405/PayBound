@@ -38,6 +38,9 @@ importers:
       '@hono/zod-validator':
         specifier: ^0.9.1
         version: 0.9.1(hono@4.13.7)(zod@4.5.4)
+      '@paybound/capability-spec':
+        specifier: workspace:*
+        version: link:../../packages/capability-spec
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
