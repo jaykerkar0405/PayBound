@@ -50,7 +50,12 @@ Field by field:
   state is checked in the invariant (`capability.nonce is unconsumed`), and
   burning it is what makes reuse (replay) impossible.
 - **`expiry`** — a timestamp after which the capability is no longer valid.
-  Short-lived by default. Checked in the invariant as `now < capability.expiry`.
+  Short-lived by default: capabilities are issued with a **5-minute (300
+  second)** expiry from issuance time. This is short enough to limit the
+  window an intercepted-but-unused capability could be replayed within
+  (relevant to the `STALE_NONCE` clause in `SECURITY_INVARIANT.md`), while
+  long enough for a normal agent task to complete without the capability
+  expiring mid-task. Checked in the invariant as `now < capability.expiry`.
 - **`max_uses`** — fixed at `1` unless explicitly justified otherwise:
   capabilities are single-use.
 
