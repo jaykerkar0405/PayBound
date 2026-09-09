@@ -48,9 +48,11 @@ PayBound is three components, each with a distinct trust posture:
    reads untrusted content (webpages, documents, tool output) and reasons
    over it. It never holds a signing key, never sees a destination or
    amount, and can only call `pay(capability_id)`. Its network egress is
-   locked down: arbitrary reads are allowed, but every outbound route to
-   payment infrastructure is blocked except the one authenticated channel to
-   the Broker.
+   locked down: arbitrary reads are allowed, but the Docker host gateway and
+   a set of named payment-infrastructure endpoints are blocked outside the
+   one authenticated channel to the Broker. See `THREAT_MODEL.md`'s network
+   isolation scope section for exactly what this policy does and does not
+   cover.
 3. **Settlement** — the network that actually moves funds and (optionally)
    records auditable evidence of what happened, once the Broker has signed a
    payment.
