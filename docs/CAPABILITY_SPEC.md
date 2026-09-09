@@ -160,3 +160,37 @@ single-request case:
   attempts cannot both observe the same `spent_so_far` and both proceed,
   because the check and the update happen together, in one transaction, at
   `RESERVED`.
+
+## Chainlink CRE optional policy check
+
+The Chainlink CRE confidential spend-policy check (task 5.2,
+`apps/broker/src/cre-policy.ts`) is **explicitly optional** and
+**non-load-bearing**:
+
+- It is a **defense-in-depth** pre-issuance gate, not a security invariant.
+  The 9 invariant clauses in `SECURITY_INVARIANT.md` (replay protection,
+  nonce burn, field matching, budget check, destination immutability, etc.)
+  are checked by `Broker.authorize()` against the capability's committed
+  fields — all of which are set by `issueCapability()`, which the CRE check
+  runs _before_. The CRE check has no influence on what `authorize()` checks
+  or how it checks it.
+
+- **Fail-open semantics**: if the CRE gateway is unreachable, the URL is
+  not configured, or any error occurs, `checkSpendPolicy()` returns
+  `{ allowed: true }` and issuance continues exactly as if the check had
+  never run. A broken CRE gateway cannot take `/issue` offline.
+
+- **Removal is safe**: deleting `checkSpendPolicy` from `issue.ts` (or
+  setting `CRE_ENABLED=false`) removes the check entirely. No other code
+  path depends on it. None of the 9 invariant clauses are weakened.
+
+- **What it does**: when enabled (`CRE_ENABLED=true`) and a gateway
+  responds with `{ allowed: false }`, issuance is blocked with HTTP 403
+  `spend_policy_exceeded`. This is the only code path where the CRE check
+  has any effect on issuance. See `docs/CHAINLINK_CRE_DESIGN.md` for the
+  policy question, integration point, and gateway protocol.
+
+This framing matches the pattern established in `THREAT_MODEL.md`'s
+network-isolation scope correction (PR #62): an optional, defence-in-depth
+control is documented as such so its presence or absence is never
+ambiguous.
