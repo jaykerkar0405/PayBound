@@ -15,14 +15,22 @@ import { createHash } from "node:crypto";
  * docs/LEDGER_HEDERA_RESEARCH.md: the raw canonicalized-JSON payload comes
  * back as status word 0x6E00 (`EXCEPTION_MALFORMED_APDU`), not a signature.
  *
- * This project has no real Hedera settlement wired into the Phase 1-3 flow
- * yet (`state-machine.ts`'s `submitPayment` never calls
- * `packages/settlement` — that's a later phase's integration), so there is
- * no real recipient/amount pair in Hedera's own terms (a
- * `shard.realm.num` account ID, a tinybar amount) to encode here in
- * general — `capability.recipient` in this phase is an opaque address
- * string (see property.test.ts's "0xRECIPIENT" placeholders), not
- * necessarily a Hedera account ID.
+ * `packages/settlement` is now wired in (task 4.1,
+ * docs/SETTLEMENT_INTEGRATION_PROPOSAL.md "Design A") — but as a
+ * deliberately separate signing domain, not through this function or
+ * `submitPayment`: `apps/broker/src/settlement.ts`'s `settleAndRecord`
+ * calls `packages/settlement` directly from routes/pay.ts, after
+ * `submitPayment` has already returned, using its own configured operator
+ * key to build and sign the real on-chain `TransferTransaction`.
+ * `state-machine.ts`'s `submitPayment` still only ever signs
+ * `canonicalize(reserved.capability)` via this function's dummy
+ * transaction, unchanged. There is still no real recipient/amount pair in
+ * Hedera's own terms (a `shard.realm.num` account ID, a tinybar amount) to
+ * encode *here* in general — `capability.recipient` isn't guaranteed to be
+ * a Hedera account ID outside of whatever the resource registry happens to
+ * contain (see property.test.ts's "0xRECIPIENT" placeholders) — so this
+ * function's approach remains necessary for what it proves: the Broker's
+ * own Ledger-backed authorization signature, independent of settlement.
  *
  * So rather than fabricate a recipient/amount the device would render as
  * if it meant something real, this builds the smallest transaction the
@@ -32,11 +40,13 @@ import { createHash } from "node:crypto";
  * real payload in the transaction's `memo` field (also real Hedera
  * protobuf, not a workaround). Anyone reviewing the on-device screen sees
  * that digest and can independently verify it against the payload being
- * authorized. When real settlement (packages/settlement) is wired into
- * this flow, `hederaTransactionSigner` (signer.ts) — not this function —
- * is the integration seam: `@hashgraph/sdk`'s `transaction.signWith(...)`
+ * authorized. `hederaTransactionSigner` (signer.ts) — not this function —
+ * remains the integration seam for routing *real* settlement signing
+ * through the Ledger (`@hashgraph/sdk`'s `transaction.signWith(...)`
  * already produces real, fully-formed `TransactionBody` bytes with a real
- * recipient/amount, which need no wrapping at all.
+ * recipient/amount, needing no wrapping at all), a bigger change than
+ * Design A attempts — see the proposal doc's "Design B" for what that
+ * would require and why it wasn't done here.
  *
  * Protobuf shape (field numbers verified directly against
  * LedgerHQ/app-hedera's proto/transaction_body.proto,

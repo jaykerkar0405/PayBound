@@ -1,6 +1,11 @@
 export { config, requireConfig, requireTopicId, type Config } from "./config.js";
 export { createHederaClient, getHederaClient } from "./hedera-client.js";
-export { submitToHedera, type HederaSubmissionResult } from "./submit.js";
+export {
+    submitToHedera,
+    queryHederaTransactionReceipt,
+    type HederaSubmissionResult,
+    type HederaReconciliationResult,
+} from "./submit.js";
 
 // HCS audit trail (task 4.2)
 export {

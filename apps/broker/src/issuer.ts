@@ -10,6 +10,7 @@ import { db } from "./db.js";
 import { getResourceById } from "./registry.js";
 import { canonicalize, hashCanonical } from "./hash.js";
 import { stubSign } from "./signer.js";
+import { auditCapabilityIssued } from "./hcs-audit.js";
 
 /**
  * Issued capabilities: the ISSUED state per CAPABILITY_SPEC.md's payment
@@ -118,8 +119,17 @@ export interface IssueCapabilityResult {
  * CAPABILITY_SPEC.md, with maxUses=1 and a short, fixed expiry. Rejects
  * issuance against an unknown resource or a requested exactAmount that
  * doesn't match the registry's price for that resource.
+ *
+ * `auditFn` defaults to the real HCS logger (hcs-audit.ts's
+ * `auditCapabilityIssued`, task 4.2) and is fire-and-forget — never
+ * awaited, never able to fail issuance itself. Injectable (mirroring
+ * state-machine.ts's `submitPayment(reserved, signer)`) purely so tests
+ * can assert on the exact event without mocking any module.
  */
-export function issueCapability(input: IssueCapabilityInput): IssueCapabilityResult {
+export function issueCapability(
+  input: IssueCapabilityInput,
+  auditFn: typeof auditCapabilityIssued = auditCapabilityIssued,
+): IssueCapabilityResult {
   const resource = getResourceById(input.resourceId);
   if (resource === undefined) {
     throw new Error(
@@ -167,6 +177,18 @@ export function issueCapability(input: IssueCapabilityInput): IssueCapabilityRes
     signature,
     0,
   );
+
+  void auditFn({
+    eventType: "capability_issued",
+    timestamp: new Date().toISOString(),
+    taskHash: capability.taskHash,
+    resourceId: capability.resourceId,
+    recipient: capability.recipient,
+    exactAmount: capability.exactAmount,
+    paymentRequestHash: capability.paymentRequestHash,
+    session: capability.session,
+    expiry: capability.expiry,
+  });
 
   return { capabilityId, expiry: capability.expiry };
 }
