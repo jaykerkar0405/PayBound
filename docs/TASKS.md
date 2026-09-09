@@ -122,9 +122,13 @@ needs the broker's `pay()` endpoint (1.7).
 
 - [ ] **3.1** Integrate Ledger for broker key management: broker holds/uses a
       Ledger-backed signing key instead of a software key. Depends on 1.7. *(Sandbox, per ownership note)*
-- [ ] **3.2** Swap the stub signer used in Phase 1 tests for the real
+- [x] **3.2** Swap the stub signer used in Phase 1 tests for the real
       Ledger-backed signer and re-run the property test suite (1.8) to confirm
-      behavior is unchanged. Depends on 3.1, 1.8. *(Sandbox)*
+      behavior is unchanged. Depends on 3.1, 1.8. *(Sandbox)* — done against
+      Speculos (LedgerHQ/app-hedera under emulation), not real hardware; see
+      `packages/ledger-signer/speculos/README.md` for why and how to
+      reproduce it. `LEDGER_SIGNING_ENABLED`/`LEDGER_TRANSPORT` now default
+      to real-signer/`speculos`.
 
 ## Phase 4 — Settlement & Audit Trail (Hedera/HCS)
 
