@@ -1,0 +1,36 @@
+name: Broker Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: apps/broker test suite (incl. Ledger/Speculos)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `docker` is preinstalled and running on GitHub-hosted ubuntu-latest
+      # runners, so this needs no extra setup: the broker test suite's
+      # `globalSetup` (apps/broker/src/__tests__/global-setup.speculos.ts)
+      # provisions its own Speculos instance automatically — same as it does
+      # on a fresh local checkout — runs the full 77-test suite including
+      # the Ledger-backed property tests (task 1.8/3.2), and tears the
+      # container down afterward. No manual Speculos setup, here or locally.
+      - name: Run broker test suite
+        run: pnpm turbo run test --filter=broker

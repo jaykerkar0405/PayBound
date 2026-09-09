@@ -52,7 +52,7 @@ tooling. That is non-trivial engineering:
 > **If Option 2 is ever needed** (e.g. a fully scripted CI-style end-to-end
 > test that exercises real signing unattended), revisit this document at that
 > point. The right reference implementation to adapt is the test-time poller
-> in `apps/broker/src/__tests__/setup.speculos.ts` (when that file is
+> in `apps/broker/src/__tests__/global-setup.speculos.ts` (when that file is
 > created as part of task 3.1). Do **not** add such a poller now; the
 > infrastructure it would poll doesn't exist yet.
 
