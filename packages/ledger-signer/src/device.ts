@@ -22,7 +22,12 @@ export function openLedgerDevice(): HID {
   return new HID(device.path);
 }
 
-/** Writes one already-framed 64-byte HID block (see hid-framing.ts). */
+/**
+ * Writes one already-framed 64-byte HID block (see hid-framing.ts). The
+ * leading report-ID byte is modeled on `@ledgerhq/hw-transport-node-hid-
+ * noevents`'s `TransportNodeHid.js` `writeHID` — see hid-framing.ts's top
+ * comment for the exact source/version/license attribution.
+ */
 export function writeHidBlock(device: HID, block: Buffer): void {
   device.write(Buffer.concat([Buffer.from([HID_REPORT_ID]), block]));
 }

@@ -18,16 +18,24 @@ export function stubSign(payload: string): string {
 }
 
 /**
- * Real Ledger-backed signer (task 3.1b) — a drop-in `(payload) => string`
- * replacement for `stubSign`, backed by a custom APDU client talking
- * directly to the Ledger Hedera device app's INS_SIGN_TRANSACTION
- * instruction (curve: ECDSA secp256k1; see docs/LEDGER_HEDERA_RESEARCH.md
- * and docs/OPEN_QUESTIONS.md "Resolved: Ledger signing curve mismatch").
- * Requires a connected, unlocked Ledger with the Hedera app open — throws
+ * Real Ledger-backed signer (task 3.1b) — a drop-in replacement for
+ * `stubSign`, backed by a custom APDU client talking directly to the
+ * Ledger Hedera device app's INS_SIGN_TRANSACTION instruction (curve:
+ * ECDSA secp256k1; see docs/LEDGER_HEDERA_RESEARCH.md and
+ * docs/OPEN_QUESTIONS.md "Resolved: Ledger signing curve mismatch").
+ * Requires a connected, unlocked Ledger with the Hedera app open — rejects
  * otherwise (see @paybound/ledger-signer's device.ts).
+ *
+ * Async, not `(payload) => string`: `@paybound/ledger-signer`'s actual
+ * device I/O runs in a worker thread (see its index.ts) so that however
+ * long the user takes to physically confirm on-device never blocks this
+ * process's main event loop. `resolveSigner`/`submitPayment` (state-
+ * machine.ts) accept either a sync or async signer for exactly this
+ * reason.
  */
-export function ledgerSign(payload: string): string {
-  return signHederaPayload(Buffer.from(payload, "utf8"), config.ledgerKeyIndex).toString("hex");
+export async function ledgerSign(payload: string): Promise<string> {
+  const signature = await signHederaPayload(Buffer.from(payload, "utf8"), config.ledgerKeyIndex);
+  return signature.toString("hex");
 }
 
 /**
@@ -49,6 +57,6 @@ export function hederaTransactionSigner(
  * re-verifying the property test suite (docs/TASKS.md) against the real
  * signer.
  */
-export function resolveSigner(): (payload: string) => string {
+export function resolveSigner(): (payload: string) => string | Promise<string> {
   return config.ledgerSigningEnabled ? ledgerSign : stubSign;
 }

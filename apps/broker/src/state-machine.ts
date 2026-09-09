@@ -181,16 +181,17 @@ export function reservePayment(
 /**
  * Constructs and signs the canonical payment request as part of the
  * RESERVED -> SUBMITTED transition (docs/PROTOCOL.md §1: "signing is not a
- * separate transition — it happens as part of" this one). `signer` should
- * be a stub signer in Phase 1 (see signer.ts); real Ledger signing is task
- * 3.1.
+ * separate transition — it happens as part of" this one). `signer` may be
+ * the Phase 1 stub (synchronous) or the real Ledger-backed signer (async —
+ * its device I/O runs off the main thread; see signer.ts's `ledgerSign`),
+ * selected via signer.ts's `resolveSigner`.
  */
-export function submitPayment(
+export async function submitPayment(
   reserved: ReservedPaymentState,
-  signer: (payload: string) => string,
-): SubmittedPaymentState {
+  signer: (payload: string) => string | Promise<string>,
+): Promise<SubmittedPaymentState> {
   const payload = canonicalize(reserved.capability);
-  const signature = signer(payload);
+  const signature = await signer(payload);
   const submittedAt = new Date().toISOString();
 
   insertSubmissionStatement.run(reserved.capability.nonce, signature, submittedAt);
