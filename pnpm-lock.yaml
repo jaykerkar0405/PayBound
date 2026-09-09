@@ -44,6 +44,9 @@ importers:
       '@paybound/ledger-signer':
         specifier: workspace:*
         version: link:../../packages/ledger-signer
+      '@paybound/settlement':
+        specifier: workspace:*
+        version: link:../../packages/settlement
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3

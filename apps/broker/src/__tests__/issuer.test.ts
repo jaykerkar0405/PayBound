@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { capabilityIdSchema } from "@paybound/capability-spec";
 import { seedRegistry } from "../registry.js";
 import { getCapabilityRecord, issueCapability, type IssueCapabilityInput } from "../issuer.js";
@@ -106,5 +106,38 @@ describe("issueCapability", () => {
     const record = getCapabilityRecord(result.capabilityId);
     expect(typeof record?.signature).toBe("string");
     expect(record?.signature.length).toBeGreaterThan(0);
+  });
+
+  it("fires the HCS capability_issued audit event with the persisted capability's fields, excluding nonce (task 4.2)", async () => {
+    const resource = seedResource({ recipient: "0xAUDIT_RECIPIENT" });
+    const auditFn = vi.fn().mockResolvedValue(undefined);
+
+    const result = issueCapability(
+      makeInput({ resourceId: resource.resourceId, exactAmount: resource.price }),
+      auditFn,
+    );
+    const record = getCapabilityRecord(result.capabilityId);
+
+    expect(auditFn).toHaveBeenCalledTimes(1);
+    const [event] = auditFn.mock.calls[0] as [Record<string, unknown>];
+    expect(event).toMatchObject({
+      eventType: "capability_issued",
+      taskHash: record?.capability.taskHash,
+      resourceId: resource.resourceId,
+      recipient: "0xAUDIT_RECIPIENT",
+      exactAmount: resource.price,
+      paymentRequestHash: record?.capability.paymentRequestHash,
+      session: record?.capability.session,
+      expiry: result.expiry,
+    });
+    expect(event).not.toHaveProperty("nonce");
+  });
+
+  it("does not fire the HCS audit event when issuance fails validation", () => {
+    const auditFn = vi.fn().mockResolvedValue(undefined);
+
+    expect(() => issueCapability(makeInput({ resourceId: randomUUID() }), auditFn)).toThrow();
+
+    expect(auditFn).not.toHaveBeenCalled();
   });
 });
