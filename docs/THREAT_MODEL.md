@@ -63,6 +63,31 @@ out-of-scope requests, giving the system a designed "pause and ask" option
 before an attempt ever reaches the Broker — not a weakening of the invariant
 itself, and not a third outcome the invariant needs to formally represent.
 
+## Sandbox network isolation: scope
+
+The sandbox enforces a default-deny outbound policy with explicit allowances
+for the Broker channel, DNS, loopback, and standard web ports (80/443) to
+arbitrary hosts — arbitrary outbound reads are an intentional capability,
+required so the agent can process untrusted web content (see the
+prompt-injection attack scenarios, tasks 2.6-2.8).
+
+On top of this baseline, the policy explicitly blocks the Docker host
+gateway and a set of named, demo-enumerated payment-infrastructure
+endpoints. This demonstrates that a compromised agent cannot reach a known
+payment channel outside the Broker, even while it retains normal web-read
+capability.
+
+**Scope limitation:** this policy does not attempt to classify or block
+arbitrary, previously-unknown payment infrastructure at the network layer.
+Distinguishing "arbitrary untrusted content" from "arbitrary payment API" by
+host/port alone is not generally solvable without deeper application-layer
+inspection (e.g. a content-aware proxy), which is out of scope for this
+build. The security guarantee this project makes does not depend on network
+isolation catching unknown payment endpoints — it depends on the payment
+tool itself having no fields for an attacker to redirect (see
+`SECURITY_INVARIANT.md`). Network isolation is defense-in-depth on top of
+that, not the primary guarantee.
+
 ## Why naming these exclusions is a strength, not a weakness
 
 Naming these isn't a weakness — it's what makes everything inside the

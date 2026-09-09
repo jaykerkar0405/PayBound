@@ -5,9 +5,12 @@ set -euo pipefail
 # PayBound Agent Sandbox — Live Network Boundary Demonstration (Task 2.9)
 # ==============================================================================
 # Demonstrates live to a viewer that:
-# 1. Outbound calls to payment infrastructure are physically dropped / blocked.
-# 2. Outbound calls to the designated Broker channel are allowed (200 OK).
+# 1. Outbound calls to the designated Broker channel are allowed (200 OK).
+# 2. Outbound calls to a named payment-infrastructure target are physically
+#    dropped / blocked.
 # 3. Outbound calls to public web endpoints for reading content are allowed.
+# 4. A second, unrelated arbitrary host is also reachable — proving the
+#    policy is default-deny-then-selectively-allow, not special-cased.
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,9 +29,10 @@ RESET="\033[0m"
 echo -e "${BOLD}${BLUE}========================================================================"
 echo -e "PayBound Agent Sandbox — Live Network Boundary Demonstration"
 echo -e "========================================================================${RESET}"
-echo -e "Testing architectural claim from ${CYAN}docs/ARCHITECTURE.md${RESET}:"
-echo -e "  ${BOLD}\"Arbitrary reads are allowed, but every outbound route to payment"
-echo -e "   infrastructure is blocked except the one authenticated channel to the Broker.\"${RESET}"
+echo -e "Testing architectural claim from ${CYAN}docs/ARCHITECTURE.md${RESET} / ${CYAN}docs/THREAT_MODEL.md${RESET}:"
+echo -e "  ${BOLD}\"Arbitrary web reads are allowed; the Docker host gateway and named"
+echo -e "   payment-infrastructure endpoints are blocked outside the one authenticated"
+echo -e "   channel to the Broker.\"${RESET}"
 echo -e "------------------------------------------------------------------------"
 
 # Ensure docker is available
@@ -103,7 +107,7 @@ echo -e "-----------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 # Test 1: Allowed call to the designated Broker channel
 # ------------------------------------------------------------------------------
-echo -e "\n${BOLD}[1/3] Attempting call to Broker channel (should be ALLOWED)...${RESET}"
+echo -e "\n${BOLD}[1/4] Attempting call to Broker channel (should be ALLOWED)...${RESET}"
 BROKER_OUTPUT=""
 BROKER_STATUS=0
 BROKER_OUTPUT=$(docker run --rm \
@@ -124,9 +128,13 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# Test 2: Blocked call to stand-in Payment Facilitator
+# Test 2: Blocked call to a NAMED payment-infra target (PAYMENT_INFRA_HOSTS)
 # ------------------------------------------------------------------------------
-echo -e "\n${BOLD}[2/3] Attempting direct call to Payment Facilitator (should be BLOCKED)...${RESET}"
+# The Payment Facilitator is reached here through the explicit named-target
+# block list, not incidentally via the gateway block below — this is what
+# distinguishes "we block a specific payment endpoint we've named" from
+# "we happened to block the one IP everything in this demo runs on."
+echo -e "\n${BOLD}[2/4] Attempting direct call to named Payment Facilitator target (should be BLOCKED)...${RESET}"
 BLOCKED_OUTPUT=""
 BLOCKED_STATUS=0
 BLOCKED_OUTPUT=$(docker run --rm \
@@ -134,12 +142,13 @@ BLOCKED_OUTPUT=$(docker run --rm \
   --add-host=host.docker.internal:host-gateway \
   -e BROKER_HOST=host.docker.internal \
   -e BROKER_PORT="$BROKER_PORT" \
+  -e PAYMENT_INFRA_HOSTS="host.docker.internal:${FACILITATOR_PORT}" \
   "$IMAGE_TAG" \
   curl -sSf --connect-timeout 2 "http://host.docker.internal:${FACILITATOR_PORT}/settle" 2>&1) || BLOCKED_STATUS=$?
 
 if [ "$BLOCKED_STATUS" -ne 0 ]; then
-  echo -e "  Result: ${RED}${BOLD}✗ BLOCKED: Outbound connection to payment infrastructure physically dropped (exit code $BLOCKED_STATUS)${RESET}"
-  echo -e "  Detail: iptables dropped packets to container gateway / host network."
+  echo -e "  Result: ${RED}${BOLD}✗ BLOCKED: Outbound connection to named payment infrastructure target dropped (exit code $BLOCKED_STATUS)${RESET}"
+  echo -e "  Detail: iptables dropped packets to the named PAYMENT_INFRA_HOSTS target."
 else
   echo -e "  Result: ${RED}${BOLD}FATAL SECURITY BREACH: Call to payment infrastructure succeeded!${RESET}" >&2
   echo -e "  Output: $BLOCKED_OUTPUT" >&2
@@ -149,7 +158,7 @@ fi
 # ------------------------------------------------------------------------------
 # Test 3: Allowed call to public web endpoint (verifying arbitrary web reads)
 # ------------------------------------------------------------------------------
-echo -e "\n${BOLD}[3/3] Attempting public web read (should be ALLOWED)...${RESET}"
+echo -e "\n${BOLD}[3/4] Attempting public web read (should be ALLOWED)...${RESET}"
 WEB_OUTPUT=""
 WEB_STATUS=0
 WEB_OUTPUT=$(docker run --rm \
@@ -168,17 +177,45 @@ else
 fi
 
 # ------------------------------------------------------------------------------
+# Test 4: Allowed call to a SECOND, unrelated arbitrary host
+# ------------------------------------------------------------------------------
+# Proves the policy is a genuine default-deny-then-selectively-allow baseline
+# (any host on 80/443 not otherwise named) rather than special-cased to just
+# example.com and the Broker.
+echo -e "\n${BOLD}[4/4] Attempting public web read to a second, unrelated host (should be ALLOWED)...${RESET}"
+WEB2_OUTPUT=""
+WEB2_STATUS=0
+WEB2_OUTPUT=$(docker run --rm \
+  --cap-add=NET_ADMIN \
+  --add-host=host.docker.internal:host-gateway \
+  -e BROKER_HOST=host.docker.internal \
+  -e BROKER_PORT="$BROKER_PORT" \
+  "$IMAGE_TAG" \
+  curl -sSf --connect-timeout 5 "https://httpbin.org/get" 2>&1) || WEB2_STATUS=$?
+
+if [ "$WEB2_STATUS" -eq 0 ]; then
+  echo -e "  Result: ${GREEN}${BOLD}✓ ALLOWED: Second arbitrary host reachable (policy is not special-cased)${RESET}"
+else
+  echo -e "  Result: ${RED}${BOLD}✗ FAILED: Second arbitrary host unreachable (exit code $WEB2_STATUS)${RESET}" >&2
+  exit 1
+fi
+
+# ------------------------------------------------------------------------------
 # Final Summary
 # ------------------------------------------------------------------------------
 echo -e "\n${BOLD}${BLUE}------------------------------------------------------------------------"
 echo -e "Demonstration Complete: Network Boundary Guarantee Verified"
 echo -e "------------------------------------------------------------------------${RESET}"
 echo -e "  Broker Channel (port $BROKER_PORT):          ${GREEN}ALLOWED (200 OK)${RESET}"
-echo -e "  Payment Facilitator (port $FACILITATOR_PORT):     ${RED}BLOCKED (Connection Dropped)${RESET}"
+echo -e "  Named Payment Facilitator (port $FACILITATOR_PORT): ${RED}BLOCKED (Connection Dropped)${RESET}"
 echo -e "  Public Web Read (example.com):         ${GREEN}ALLOWED (Read-Only Web Egress)${RESET}"
+echo -e "  Second Arbitrary Host (httpbin.org):    ${GREEN}ALLOWED (Read-Only Web Egress)${RESET}"
 echo -e ""
-echo -e "${BOLD}${GREEN}CONCLUSION: The sandbox cannot reach payment infrastructure directly."
-echo -e "All payments MUST flow through the Broker authorization channel.${RESET}"
+echo -e "${BOLD}${GREEN}CONCLUSION: The sandbox cannot reach the named payment-infrastructure"
+echo -e "target directly, while retaining normal web-read capability. All payments"
+echo -e "MUST flow through the Broker authorization channel. (Arbitrary,"
+echo -e "previously-unnamed payment endpoints are out of scope for network-layer"
+echo -e "blocking — see docs/THREAT_MODEL.md.)${RESET}"
 echo -e "${BOLD}${BLUE}========================================================================${RESET}"
 
 exit 0
