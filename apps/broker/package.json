@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:live": "node --env-file=.env.local --import tsx/esm src/index.ts",
     "lint": "eslint .",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
@@ -16,6 +17,7 @@
     "@hono/zod-validator": "^0.9.1",
     "@paybound/capability-spec": "workspace:*",
     "@paybound/ledger-signer": "workspace:*",
+    "@paybound/settlement": "workspace:*",
     "better-sqlite3": "^13.0.3",
     "hono": "^4.13.7",
     "zod": "^4.5.4"

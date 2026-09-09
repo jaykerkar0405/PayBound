@@ -36,6 +36,21 @@ export interface Config {
   readonly ledgerSpeculosHost: string;
   /** Port of the Speculos instance's TCP APDU port; only used when `ledgerTransport` is `speculos`. */
   readonly ledgerSpeculosPort: number;
+  /**
+   * Hedera Testnet operator account for @paybound/settlement (task 4.1),
+   * e.g. "0.0.1234". `undefined` until provisioned — see .env.example.
+   * settlement.ts's `isSettlementConfigured()` (not this frozen field)
+   * gates whether settlement is actually attempted, reading
+   * `process.env` lazily so tests can toggle it per case; this field
+   * exists for documentation/general use, matching the same
+   * frozen-snapshot-plus-lazy-read split `packages/settlement/src/config.ts`
+   * already uses for `hcsTopicId`/`requireTopicId`.
+   */
+  readonly hederaTestnetAccountId: string | undefined;
+  /** Hedera Testnet operator private key (DER-encoded), paired with `hederaTestnetAccountId`. `undefined` until provisioned — see .env.example. */
+  readonly hederaTestnetPrivateKey: string | undefined;
+  /** HCS topic ID for the audit trail (task 4.2), created once via `packages/settlement`'s `createAuditTopic()`. `undefined` until provisioned — see .env.example. */
+  readonly hederaHcsTopicId: string | undefined;
 }
 
 function parseLedgerTransport(value: string | undefined): LedgerTransportKind {
@@ -55,4 +70,7 @@ export const config: Config = {
   ledgerTransport: parseLedgerTransport(process.env.LEDGER_TRANSPORT),
   ledgerSpeculosHost: process.env.LEDGER_SPECULOS_HOST ?? "127.0.0.1",
   ledgerSpeculosPort: Number(process.env.LEDGER_SPECULOS_PORT ?? 9999),
+  hederaTestnetAccountId: process.env.HEDERA_TESTNET_ACCOUNT_ID,
+  hederaTestnetPrivateKey: process.env.HEDERA_TESTNET_PRIVATE_KEY,
+  hederaHcsTopicId: process.env.HEDERA_HCS_TOPIC_ID,
 };
