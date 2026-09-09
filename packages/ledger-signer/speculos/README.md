@@ -47,6 +47,33 @@ run` command) for anyone who wants to verify or update it.
 
 ## Running it
 
+### Interactive mode (human-attended, requires a real terminal)
+
+```
+./start.sh
+```
+
+Starts Speculos in the foreground. Press **Ctrl-C** to stop. Use this during
+the live demo — the device screen shows transaction fields that a human
+reviews and approves.
+
+### Detached mode (scripted / background)
+
+```
+./start.sh --detach
+```
+
+Starts Speculos as a detached Docker container (`docker run -d`). Use this in
+scripts or CI contexts where stdin is not a terminal — the original
+`docker run -it` fails with *"cannot attach stdin to a TTY-enabled container
+because stdin is not a terminal"* in those contexts. Stop it with:
+
+```
+./stop.sh
+```
+
+### Direct docker run (equivalent to `./start.sh`)
+
 ```
 docker run --rm -it \
   -p 9999:9999 -p 5000:5000 \
@@ -56,12 +83,6 @@ docker run --rm -it \
   --apdu-port 9999 --api-port 5000 \
   --seed "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" \
   /speculos/local/app-hedera.elf
-```
-
-or via the wrapper script (same command, run from the repo root):
-
-```
-packages/ledger-signer/speculos/start.sh
 ```
 
 This matches `apps/broker/src/config.ts`'s defaults
@@ -76,6 +97,23 @@ there and not in `@paybound/ledger-signer` itself).
 The seed above is Speculos's own well-known BIP-39 test seed (used
 throughout Ledger's own app test suites) — not a secret, and not connected
 to any real funds; do not reuse it for anything real.
+
+## Approving transactions during the live demo
+
+When the broker submits a signing request, Speculos displays a transaction
+review screen. A human must navigate and approve:
+
+1. Press **right** to advance through each transaction field.
+2. Press **both buttons** on the final "Sign"/"Approve" screen to confirm.
+
+> **Approval timeout**: the broker's signing call waits up to 60 s. If
+> approval takes longer, the call times out with:
+> `"ledger device: timed out waiting for a Speculos APDU response"`.
+> Restart Speculos to clear stale device state (status word `0x6901`) before
+> retrying.
+
+See `docs/DEMO_SIGNING_APPROACH.md` for the full decision rationale on why
+human approval was chosen over auto-approval for the live demo.
 
 ## Why signing works against a dummy transaction, not a real one
 
