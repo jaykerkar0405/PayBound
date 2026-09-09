@@ -59,26 +59,30 @@ an unambiguous contract to build against. Do these first and in this order.
 Everything else depends on a working broker, since it's the only thing that
 signs payments.
 
-- [ ] **1.1** Scaffold the broker service (project skeleton, config, health check
+- [x] **1.1** Scaffold the broker service (project skeleton, config, health check
       endpoint). Depends on 0.5. *(Broker)*
-- [ ] **1.2** Implement the resource registry: closed, pre-vetted set of
+- [x] **1.2** Implement the resource registry: closed, pre-vetted set of
       `resource_id -> recipient/price` entries, populated before any agent run
       starts. Depends on 1.1. *(Broker)*
-- [ ] **1.3** Implement the capability issuer: given a task definition, produces
+- [x] **1.3** Implement the capability issuer: given a task definition, produces
       a signed `Capability` object per `CAPABILITY_SPEC.md`, with `max_uses=1`
       and short expiry. Depends on 1.2, 0.3. *(Broker)*
-- [ ] **1.4** Implement the `Task` budget tracker (`max_total_spend`,
+- [x] **1.3a** Expose `POST /issue` HTTP endpoint so `issueCapability()` is
+      callable outside tests. New `issueRequestSchema`/`IssueRequest` in
+      `packages/types`, re-exported via `@paybound/capability-spec`.
+      `apps/broker/src/routes/issue.ts` modeled on `pay.ts`. PR #51. *(Broker)*
+- [x] **1.4** Implement the `Task` budget tracker (`max_total_spend`,
       `spent_so_far`) with atomic increment. Depends on 1.1. *(Broker)*
-- [ ] **1.5** Implement the payment state machine (`ISSUED -> RESERVED ->
+- [x] **1.5** Implement the payment state machine (`ISSUED -> RESERVED ->
       SUBMITTED -> SETTLED`, with `RECOVERABLE`/`FAILED` branches) as an atomic
       transaction at the `RESERVED` step (nonce burn + budget check together).
       Depends on 1.3, 1.4. *(Broker)*
-- [ ] **1.6** Implement `Broker.authorize(payment)` enforcing every clause of the
+- [x] **1.6** Implement `Broker.authorize(payment)` enforcing every clause of the
       formal invariant from `SECURITY_INVARIANT.md`. Depends on 1.5, 0.2. *(Broker)*
-- [ ] **1.7** Implement the `pay(capability_id)` endpoint the agent sandbox calls,
+- [x] **1.7** Implement the `pay(capability_id)` endpoint the agent sandbox calls,
       per the protocol in 0.4: looks up the capability, runs `authorize`,
       constructs and signs the real payment. Depends on 1.6, 0.4. *(Broker)*
-- [ ] **1.8** Property tests against the broker (can run against a stub signer
+- [x] **1.8** Property tests against the broker (can run against a stub signer
       before 3.x lands): replay, substitution, escalation, stale nonce, session
       mismatch, task_hash mismatch, concurrent double-spend on the same task
       budget, malformed capability_id. Depends on 1.7. *(Broker)*
@@ -122,6 +126,12 @@ needs the broker's `pay()` endpoint (1.7).
 
 - [ ] **3.1** Integrate Ledger for broker key management: broker holds/uses a
       Ledger-backed signing key instead of a software key. Depends on 1.7. *(Sandbox, per ownership note)*
+- [x] **3.1a** Document demo signing approach and create non-interactive-safe
+      Speculos start/stop scripts. Chose Option 1 (human approval) over
+      auto-approval — on-device confirmation is part of the security demo story.
+      Fixed `docker run -it` failure in non-interactive contexts by adding
+      `--detach` mode (`docker run -d`). See `docs/DEMO_SIGNING_APPROACH.md`
+      and `packages/ledger-signer/speculos/`. PR #59. *(Settlement)*
 - [ ] **3.2** Swap the stub signer used in Phase 1 tests for the real
       Ledger-backed signer and re-run the property test suite (1.8) to confirm
       behavior is unchanged. Depends on 3.1, 1.8. *(Sandbox)*
@@ -131,11 +141,13 @@ needs the broker's `pay()` endpoint (1.7).
 Independent of Phase 2/3 aside from needing a signed payment object to settle;
 can start once 1.7 exists.
 
-- [ ] **4.1** Integrate Hedera settlement: broker submits the signed payment for
-      settlement on Hedera. Depends on 1.7. *(Settlement)*
-- [ ] **4.2** Integrate HCS (Hedera Consensus Service) for an externally
+- [x] **4.1** Integrate Hedera settlement: broker submits the signed payment for
+      settlement on Hedera. Real testnet transaction confirmed on HashScan.
+      PR #47 merged. *(Settlement)*
+- [x] **4.2** Integrate HCS (Hedera Consensus Service) for an externally
       verifiable audit trail: log capability issuance, authorization decisions,
-      and settlement outcomes as HCS messages. Depends on 4.1. *(Settlement)*
+      and settlement outcomes as HCS messages. Real HCS topics confirmed on
+      HashScan. PR #50 merged. *(Settlement)*
 - [ ] **4.3** Update the payment state machine's `SUBMITTED -> SETTLED/FAILED`
       transition to reflect real Hedera settlement results instead of a stub.
       Note (per CAPABILITY_SPEC.md "Triggering conditions for RECOVERABLE and
