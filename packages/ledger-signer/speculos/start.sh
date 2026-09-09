@@ -1,46 +1,28 @@
 #!/usr/bin/env bash
-# packages/ledger-signer/speculos/start.sh
-#
-# Starts the Speculos Ledger emulator via Docker.
+# Starts Speculos running app-hedera.elf on the ports apps/broker/src/config.ts
+# defaults to (LEDGER_SPECULOS_HOST=127.0.0.1, LEDGER_SPECULOS_PORT=9999).
+# See README.md in this directory for what this is and why.
 #
 # Usage:
-#   ./start.sh            # interactive (foreground, Ctrl-C to stop)
+#   ./start.sh            # interactive (foreground, Ctrl-C to stop) — requires a real terminal
 #   ./start.sh --detach   # detached background container (run stop.sh to stop)
 #
-# The original invocation used `docker run -it`, which fails in non-interactive
+# The original `docker run -it` invocation fails in non-interactive/scripted
 # contexts ("cannot attach stdin to a TTY-enabled container because stdin is
-# not a terminal"). This script selects the right flags based on the --detach
-# argument so it works both for human-attended and scripted/demo runs.
-#
-# Environment variables (all optional, with defaults):
-#   SPECULOS_APDU_PORT   — port for APDU transport  (default: 9999)
-#   SPECULOS_HTTP_PORT   — port for HTTP button API  (default: 5000)
-#   SPECULOS_APP_PATH    — path to the compiled .elf app to load
-#                          (default: ./app/app.elf relative to this script)
-#   SPECULOS_SEED        — BIP-39 mnemonic for the emulated device
-#                          (default: test only mnemonic — do NOT use in production)
+# not a terminal"). Pass --detach for those contexts.
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-APDU_PORT="${SPECULOS_APDU_PORT:-9999}"
-HTTP_PORT="${SPECULOS_HTTP_PORT:-5000}"
-APP_PATH="${SPECULOS_APP_PATH:-$SCRIPT_DIR/app/app.elf}"
-SEED="${SPECULOS_SEED:-test test test test test test test test test test test junk}"
-CONTAINER_NAME="paybound-speculos"
-IMAGE="ghcr.io/ledgerhq/speculos:latest"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DETACH=false
 if [[ "${1:-}" == "--detach" ]]; then
   DETACH=true
 fi
 
-if [[ ! -f "$APP_PATH" ]]; then
-  echo "ERROR: Speculos app binary not found at: $APP_PATH"
-  echo "Build the Ledger app first, or set SPECULOS_APP_PATH to its location."
-  exit 1
-fi
+CONTAINER_NAME="paybound-speculos"
+IMAGE="ghcr.io/ledgerhq/speculos@sha256:6ed9eefd51cddd862b746719af4cd7a3265fe43d0588c388359753cab8d46d11"
+SEED="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
 
 # Remove any stale container with the same name
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
@@ -49,34 +31,27 @@ if [[ "$DETACH" == "true" ]]; then
   echo "Starting Speculos in detached mode (container: $CONTAINER_NAME)..."
   CONTAINER_ID=$(docker run -d \
     --name "$CONTAINER_NAME" \
-    -p "$APDU_PORT:9999" \
-    -p "$HTTP_PORT:5000" \
-    -v "$APP_PATH:/app/app.elf:ro" \
-    -e SPECULOS_SEED="$SEED" \
+    -p 9999:9999 -p 5000:5000 \
+    -v "$script_dir":/speculos/local \
     "$IMAGE" \
-    --apdu-port 9999 \
-    --api-port 5000 \
+    --model nanox --display headless \
+    --apdu-port 9999 --api-port 5000 \
     --seed "$SEED" \
-    /app/app.elf)
-
+    /speculos/local/app-hedera.elf)
   echo "Speculos started: container ID $CONTAINER_ID"
-  echo "  APDU port : $APDU_PORT"
-  echo "  HTTP port : $HTTP_PORT"
+  echo "  APDU port : 9999"
+  echo "  HTTP port : 5000"
   echo "  Run ./stop.sh to stop."
 else
   echo "Starting Speculos in interactive mode (Ctrl-C to stop)..."
-  echo "  APDU port : $APDU_PORT"
-  echo "  HTTP port : $HTTP_PORT"
   # -it only in interactive mode — works when stdin is a terminal
-  docker run --rm -it \
+  exec docker run --rm -it \
     --name "$CONTAINER_NAME" \
-    -p "$APDU_PORT:9999" \
-    -p "$HTTP_PORT:5000" \
-    -v "$APP_PATH:/app/app.elf:ro" \
-    -e SPECULOS_SEED="$SEED" \
+    -p 9999:9999 -p 5000:5000 \
+    -v "$script_dir":/speculos/local \
     "$IMAGE" \
-    --apdu-port 9999 \
-    --api-port 5000 \
+    --model nanox --display headless \
+    --apdu-port 9999 --api-port 5000 \
     --seed "$SEED" \
-    /app/app.elf
+    /speculos/local/app-hedera.elf
 fi
