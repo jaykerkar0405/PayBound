@@ -94,6 +94,16 @@ db.exec(`
   )
 `);
 
+// Gap 1 fix: persist the Hedera transaction ID so a future reconciliation
+// sweep has something to query against. ALTER TABLE ADD COLUMN is a safe
+// no-op migration — SQLite never throws on a new column with NULL default,
+// but WILL throw if the column already exists, so we catch that case.
+try {
+  db.exec("ALTER TABLE payment_submissions ADD COLUMN hedera_transaction_id TEXT");
+} catch {
+  // Column already exists (subsequent broker startups) — safe to ignore.
+}
+
 const insertSubmissionStatement = db.prepare<[string, string, string]>(
   "INSERT INTO payment_submissions (nonce, signature, submitted_at) VALUES (?, ?, ?)",
 );
@@ -101,6 +111,57 @@ const insertSubmissionStatement = db.prepare<[string, string, string]>(
 const updateSubmissionStatusStatement = db.prepare<[string, string]>(
   "UPDATE payment_submissions SET status = ? WHERE nonce = ?",
 );
+
+const updateHederaTxIdStatement = db.prepare<[string, string]>(
+  "UPDATE payment_submissions SET hedera_transaction_id = ? WHERE nonce = ?",
+);
+
+/**
+ * Persists the real Hedera transaction ID on a payment_submissions row so
+ * the startup reconciliation sweep (`sweepRecoverablePayments` in
+ * settlement.ts) can query it later — even after a broker crash/restart,
+ * when in-memory state is gone. Called by `settleAndRecord` as soon as a
+ * `transactionId` is returned by `submitToHedera`, before any attempt to
+ * confirm the receipt.
+ */
+export function persistHederaTxId(nonce: string, hederaTxId: string): void {
+  updateHederaTxIdStatement.run(hederaTxId, nonce);
+}
+
+interface RecoverableRow {
+  nonce: string;
+  hedera_transaction_id: string;
+}
+
+const selectRecoverableStatement = db.prepare<[], RecoverableRow>(
+  "SELECT nonce, hedera_transaction_id FROM payment_submissions WHERE status = 'RECOVERABLE' AND hedera_transaction_id IS NOT NULL",
+);
+
+/**
+ * Returns all RECOVERABLE payment rows that have a persisted Hedera
+ * transaction ID — i.e. payments that were dispatched to Hedera (so we
+ * have something to reconcile against) but whose outcome was never
+ * confirmed. Used by `sweepRecoverablePayments` on broker startup.
+ */
+export function getRecoverableSubmissions(): { nonce: string; hederaTxId: string }[] {
+  return selectRecoverableStatement.all().map((r) => ({
+    nonce: r.nonce,
+    hederaTxId: r.hedera_transaction_id,
+  }));
+}
+
+/**
+ * Resolves a RECOVERABLE payment directly by nonce, without needing a full
+ * `SubmittedPaymentState` object. Used by `sweepRecoverablePayments` during
+ * startup reconciliation, where the in-memory state is gone and only the
+ * DB row remains.
+ */
+export function resolveRecoverableByNonce(
+  nonce: string,
+  outcome: "settled" | "failed",
+): void {
+  updateSubmissionStatusStatement.run(outcome === "settled" ? "SETTLED" : "FAILED", nonce);
+}
 
 // ---------------------------------------------------------------------------
 // RESERVED
