@@ -4,13 +4,30 @@ set -e
 # ==============================================================================
 # PayBound Agent Sandbox — Network Egress Policy (Task 2.2)
 # ==============================================================================
-# Enforces structural network boundary at the iptables level:
-# - ALLOW: Arbitrary public web egress (HTTP/HTTPS, DNS) so agent can read
-#          untrusted web content, docs, and tool APIs.
-# - BLOCK: All routes to internal/host payment infrastructure endpoints.
-# - ALLOW EXCEPTION: Exactly ONE host:port pair — the designated Broker channel
-#   defined by $BROKER_HOST:$BROKER_PORT (from apps/sandbox/src/config.ts).
-# - FAIL CLOSED: If iptables rules fail to apply, exit non-zero immediately.
+# Default-deny OUTPUT baseline, with explicit ACCEPT carve-outs:
+# - loopback, established/related connections, DNS.
+# - The designated Broker channel: $BROKER_HOST:$BROKER_PORT (from
+#   apps/sandbox/src/config.ts) — the one authenticated payment channel.
+# - Standard outbound web ports (80/443) to arbitrary hosts, so the agent can
+#   read untrusted web content, docs, and tool APIs (see THREAT_MODEL.md's
+#   network isolation scope section for why this is intentional, not a gap).
+#
+# On top of that baseline, this script explicitly DROPs:
+# - The Docker host gateway (stand-in for host-side payment infrastructure).
+# - Any named payment-infrastructure targets given via $PAYMENT_INFRA_HOSTS
+#   (or the legacy singular $PAYMENT_INFRA_HOST/$PAYMENT_INFRA_PORT) — these
+#   block rules are installed before the generic web-port ACCEPT rules, so
+#   they take precedence even if a named target sits on port 80/443.
+#
+# This is NOT a claim that all payment infrastructure everywhere is blocked —
+# arbitrary, previously-unknown payment endpoints on the open internet are
+# out of scope for network-layer blocking (see THREAT_MODEL.md). The blocked
+# set here is the gateway plus whatever targets are explicitly enumerated.
+#
+# FAIL CLOSED: the OUTPUT policy is set to DROP immediately after the chain
+# is flushed, before any ACCEPT rule is added, so a mid-script failure (e.g.
+# broker host resolution failing) leaves the sandbox with no route out
+# instead of falling back to iptables' allow-all default policy.
 # ==============================================================================
 
 # Helper to resolve host to IPv4 address
@@ -62,6 +79,24 @@ if [ ! -s /etc/resolv.conf ]; then
   fi
 fi
 
+# Blocks one "host[:port]" entry: DROPs the given port on that host, or every
+# port on that host if no port is given. No-ops if the host doesn't resolve.
+block_payment_target() {
+  entry="$1"
+  host="${entry%%:*}"
+  case "$entry" in
+    *:*) port="${entry#*:}" ;;
+    *) port="" ;;
+  esac
+  [ -z "$host" ] && return 0
+  ip=$(resolve_ipv4 "$host" 2>/dev/null) || return 0
+  if [ -n "$port" ]; then
+    iptables -A OUTPUT -p tcp -d "$ip" --dport "$port" -j DROP
+  else
+    iptables -A OUTPUT -d "$ip" -j DROP
+  fi
+}
+
 BROKER_HOST="${BROKER_HOST:-host.docker.internal}"
 BROKER_PORT="${BROKER_PORT:-3000}"
 
@@ -69,50 +104,64 @@ BROKER_PORT="${BROKER_PORT:-3000}"
 iptables -F OUTPUT
 iptables -F INPUT
 
-# 2. Allow loopback traffic
+# 2. Fail-closed default: DROP as the OUTPUT policy immediately, before any
+# ACCEPT rule exists, so a failure anywhere below leaves the sandbox closed.
+iptables -P OUTPUT DROP
+
+# 3. Allow loopback traffic
 iptables -A OUTPUT -o lo -j ACCEPT
 iptables -A INPUT -i lo -j ACCEPT
 
-# 3. Allow stateful return traffic (ESTABLISHED, RELATED)
+# 4. Allow stateful return traffic (ESTABLISHED, RELATED)
 iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
-# 4. Allow DNS queries (UDP and TCP port 53)
+# 5. Allow DNS queries (UDP and TCP port 53)
 iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
 iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 
-# 5. Resolve Broker host and allow specific Broker host:port ONLY
+# 6. Resolve Broker host and allow specific Broker host:port ONLY
 BROKER_IP=$(resolve_ipv4 "$BROKER_HOST") || {
   echo "FATAL: Could not resolve Broker host: $BROKER_HOST" >&2
   exit 1
 }
-
 iptables -A OUTPUT -p tcp -d "$BROKER_IP" --dport "$BROKER_PORT" -j ACCEPT
 
-# 6. Block all other traffic to the container gateway / internal host network
-# This ensures that any other listener on the host (e.g. stand-in payment infrastructure)
-# cannot be reached from the sandbox container.
+# 7. Block the container gateway (stand-in for host-side payment infrastructure).
+# Installed before the web-port ACCEPT rules below, so it takes precedence.
 GATEWAY_IP=$(ip route show default 2>/dev/null | awk '/default/ {print $3}' | head -n 1)
 if [ -n "$GATEWAY_IP" ]; then
   iptables -A OUTPUT -d "$GATEWAY_IP" -j DROP
 fi
 
-# If stand-in or specific payment infrastructure host is specified, block it explicitly
+# 8. Block named payment-infrastructure targets. Supports a comma/space
+# separated list via $PAYMENT_INFRA_HOSTS (each entry "host" or "host:port"),
+# plus the legacy singular $PAYMENT_INFRA_HOST/$PAYMENT_INFRA_PORT pair.
+# Installed before the web-port ACCEPT rules, so a named target on 80/443 is
+# still blocked rather than falling through to the general web allowance.
 if [ -n "$PAYMENT_INFRA_HOST" ]; then
-  PAYMENT_IP=$(resolve_ipv4 "$PAYMENT_INFRA_HOST" || true)
-  if [ -n "$PAYMENT_IP" ]; then
-    if [ -n "$PAYMENT_INFRA_PORT" ]; then
-      iptables -A OUTPUT -p tcp -d "$PAYMENT_IP" --dport "$PAYMENT_INFRA_PORT" -j DROP
-    else
-      iptables -A OUTPUT -d "$PAYMENT_IP" -j DROP
-    fi
+  if [ -n "$PAYMENT_INFRA_PORT" ]; then
+    block_payment_target "${PAYMENT_INFRA_HOST}:${PAYMENT_INFRA_PORT}"
+  else
+    block_payment_target "$PAYMENT_INFRA_HOST"
   fi
 fi
 
-# 7. Allow all remaining outbound traffic (arbitrary public web, docs, tool APIs)
-iptables -A OUTPUT -j ACCEPT
+if [ -n "$PAYMENT_INFRA_HOSTS" ]; then
+  saved_ifs=$IFS
+  IFS=', 	'
+  for entry in $PAYMENT_INFRA_HOSTS; do
+    [ -n "$entry" ] && block_payment_target "$entry"
+  done
+  IFS=$saved_ifs
+fi
 
-# Default policy: DROP (any unmatched packets are dropped)
-iptables -P OUTPUT DROP
+# 9. Allow standard outbound web ports to arbitrary remaining hosts, so the
+# agent can read untrusted web content, docs, and tool APIs. Anything not
+# matched by an ACCEPT rule above falls through to the OUTPUT policy (DROP,
+# set in step 2) — this is a default-deny baseline with explicit carve-outs,
+# not an allow-all-then-block-a-few-hosts policy.
+iptables -A OUTPUT -p tcp --dport 80 -j ACCEPT
+iptables -A OUTPUT -p tcp --dport 443 -j ACCEPT
 
 echo "Sandbox egress policy applied: Web allowed, payment infra blocked, Broker exception allowed on $BROKER_IP:$BROKER_PORT"

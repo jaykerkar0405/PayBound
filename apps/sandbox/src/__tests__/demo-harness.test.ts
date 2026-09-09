@@ -155,24 +155,35 @@ describe("Live Demonstration Harness — Network Boundary Claim (Task 2.9)", () 
         expect(stdout).toContain("Testing architectural claim from docs/ARCHITECTURE.md");
 
         // 3. Verifies Allowed call section & marker
-        expect(stdout).toContain("[1/3] Attempting call to Broker channel (should be ALLOWED)...");
+        expect(stdout).toContain("[1/4] Attempting call to Broker channel (should be ALLOWED)...");
         expect(stdout).toContain("✓ ALLOWED: Successfully reached Broker (200 OK)");
 
-        // 4. Verifies Blocked call section & marker
-        expect(stdout).toContain("[2/3] Attempting direct call to Payment Facilitator (should be BLOCKED)...");
-        expect(stdout).toContain("✗ BLOCKED: Outbound connection to payment infrastructure physically dropped");
+        // 4. Verifies Blocked call section & marker (named payment-infra target, not just gateway)
+        expect(stdout).toContain(
+          "[2/4] Attempting direct call to named Payment Facilitator target (should be BLOCKED)...",
+        );
+        expect(stdout).toContain("✗ BLOCKED: Outbound connection to named payment infrastructure target dropped");
 
         // 5. Verifies Arbitrary Public Web Read section & marker
-        expect(stdout).toContain("[3/3] Attempting public web read (should be ALLOWED)...");
+        expect(stdout).toContain("[3/4] Attempting public web read (should be ALLOWED)...");
         expect(stdout).toContain("✓ ALLOWED: Public web content successfully retrieved");
 
-        // 6. Verifies Summary table & final security conclusion
+        // 6. Verifies a SECOND, unrelated arbitrary host is also reachable — proves the
+        // policy is default-deny-then-selectively-allow, not special-cased to example.com.
+        expect(stdout).toContain(
+          "[4/4] Attempting public web read to a second, unrelated host (should be ALLOWED)...",
+        );
+        expect(stdout).toContain("✓ ALLOWED: Second arbitrary host reachable (policy is not special-cased)");
+
+        // 7. Verifies Summary table & final security conclusion
         expect(stdout).toContain("Demonstration Complete: Network Boundary Guarantee Verified");
         expect(stdout).toContain("Broker Channel");
-        expect(stdout).toContain("Payment Facilitator");
+        expect(stdout).toContain("Named Payment Facilitator");
         expect(stdout).toContain("Public Web Read");
-        expect(stdout).toContain("The sandbox cannot reach payment infrastructure directly.");
-        expect(stdout).toContain("All payments MUST flow through the Broker authorization channel.");
+        expect(stdout).toContain("Second Arbitrary Host");
+        expect(stdout).toContain("The sandbox cannot reach the named payment-infrastructure");
+        expect(stdout).toContain("All payments");
+        expect(stdout).toContain("MUST flow through the Broker authorization channel.");
       },
       30_000,
     );
@@ -185,8 +196,9 @@ describe("Live Demonstration Harness — Network Boundary Claim (Task 2.9)", () 
         const stdout = stripAnsi(rawStdout);
 
         expect(stdout).toContain("✓ ALLOWED: Successfully reached Broker (200 OK)");
-        expect(stdout).toContain("✗ BLOCKED: Outbound connection to payment infrastructure physically dropped");
+        expect(stdout).toContain("✗ BLOCKED: Outbound connection to named payment infrastructure target dropped");
         expect(stdout).toContain("✓ ALLOWED: Public web content successfully retrieved");
+        expect(stdout).toContain("✓ ALLOWED: Second arbitrary host reachable (policy is not special-cased)");
         expect(stdout).toContain("Demonstration Complete: Network Boundary Guarantee Verified");
       },
       30_000,

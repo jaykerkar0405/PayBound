@@ -127,7 +127,7 @@ describe("Sandbox Network Egress Policy (Task 2.2)", () => {
     expect(stdout).toContain("broker_connected");
   });
 
-  it("blocks outbound requests to stand-in payment infrastructure hosts", async () => {
+  it("blocks outbound requests to stand-in payment infrastructure hosts (legacy PAYMENT_INFRA_HOST)", async () => {
     let failed = false;
     try {
       await execFileAsync(
@@ -159,6 +159,93 @@ describe("Sandbox Network Egress Policy (Task 2.2)", () => {
     }
 
     expect(failed).toBe(true);
+  });
+
+  it("blocks outbound requests to named payment-infrastructure targets (PAYMENT_INFRA_HOSTS list)", async () => {
+    let failed = false;
+    try {
+      await execFileAsync(
+        "docker",
+        [
+          "run",
+          "--rm",
+          "--cap-add=NET_ADMIN",
+          "--add-host=host.docker.internal:host-gateway",
+          "-e",
+          "BROKER_HOST=host.docker.internal",
+          "-e",
+          `BROKER_PORT=${brokerPort}`,
+          "-e",
+          `PAYMENT_INFRA_HOSTS=host.docker.internal:${paymentPort},example.org:9999`,
+          IMAGE_TAG,
+          "curl",
+          "-sSf",
+          "--connect-timeout",
+          "2",
+          `http://host.docker.internal:${paymentPort}`,
+        ],
+        { timeout: 15_000 },
+      );
+    } catch {
+      failed = true;
+    }
+
+    expect(failed).toBe(true);
+  });
+
+  it("blocks the Docker host gateway even when no named payment-infra host is configured", async () => {
+    let failed = false;
+    try {
+      await execFileAsync(
+        "docker",
+        [
+          "run",
+          "--rm",
+          "--cap-add=NET_ADMIN",
+          "--add-host=host.docker.internal:host-gateway",
+          "-e",
+          "BROKER_HOST=host.docker.internal",
+          "-e",
+          `BROKER_PORT=${brokerPort}`,
+          IMAGE_TAG,
+          "curl",
+          "-sSf",
+          "--connect-timeout",
+          "2",
+          `http://host.docker.internal:${paymentPort}`,
+        ],
+        { timeout: 15_000 },
+      );
+    } catch {
+      failed = true;
+    }
+
+    expect(failed).toBe(true);
+  });
+
+  it("allows outbound HTTPS requests to a second arbitrary host not referenced elsewhere, proving the policy is default-deny-then-selectively-allow rather than special-cased to example.com/Broker", async () => {
+    const { stdout } = await execFileAsync(
+      "docker",
+      [
+        "run",
+        "--rm",
+        "--cap-add=NET_ADMIN",
+        "--add-host=host.docker.internal:host-gateway",
+        "-e",
+        "BROKER_HOST=host.docker.internal",
+        "-e",
+        `BROKER_PORT=${brokerPort}`,
+        IMAGE_TAG,
+        "curl",
+        "-sSf",
+        "--connect-timeout",
+        "5",
+        "https://httpbin.org/get",
+      ],
+      { timeout: 20_000 },
+    );
+
+    expect(stdout).toContain('"url"');
   });
 
   it("blocks requests if Broker host/port is misconfigured to a different port", async () => {
