@@ -1,31 +1,22 @@
-import { openLedgerDevice, readHidBlock, writeHidBlock } from "./device.js";
-import { decodeHidBlock, encodeApduToHidBlocks, isHidDecodeComplete, type HidDecodeAccumulator } from "./hid-framing.js";
-import { buildSignTransactionApdu, parseSignTransactionResponse } from "./apdu.js";
+import { Worker } from "node:worker_threads";
+import { fileURLToPath } from "node:url";
+import type { SignWorkerRequest, SignWorkerResponse } from "./worker-protocol.js";
 
 /**
- * Generous read timeout: unlike the other Ledger commands, signing pauses
- * on-device for the user to review and confirm the transaction, which can
- * take much longer than a typical APDU round-trip.
+ * Always points at the *compiled* worker.js, even when this module itself
+ * is being run from TypeScript source (e.g. this package's own vitest
+ * suite, or a dev run via tsx). worker_threads can only load plain JS —
+ * loading a .ts file into a Worker via an `--import`/loader execArgv hook
+ * hits a known tsx/Node bug (ERR_UNKNOWN_FILE_EXTENSION) — so rather than
+ * fight that, the worker script is always the tsc-built artifact.
+ * Consumers get this for free (they only ever import this package's built
+ * dist/); running this package's own tests against src/ requires `pnpm
+ * build` to have populated dist/ first (enforced by the "pretest" script
+ * in package.json).
  */
-const HID_READ_TIMEOUT_MS = 60_000;
-
-function exchangeApdu(apdu: Buffer): Buffer {
-  const device = openLedgerDevice();
-  try {
-    const channel = Math.floor(Math.random() * 0x10000);
-    for (const block of encodeApduToHidBlocks(apdu, channel)) {
-      writeHidBlock(device, block);
-    }
-
-    let acc: HidDecodeAccumulator | undefined;
-    while (!isHidDecodeComplete(acc)) {
-      const block = readHidBlock(device, HID_READ_TIMEOUT_MS);
-      acc = decodeHidBlock(acc, block, channel);
-    }
-    return acc.data;
-  } finally {
-    device.close();
-  }
+function resolveWorkerScriptPath(): string {
+  const isRunningFromSource = import.meta.url.endsWith(".ts");
+  return fileURLToPath(new URL(isRunningFromSource ? "../dist/worker.js" : "./worker.js", import.meta.url));
 }
 
 /**
@@ -33,12 +24,35 @@ function exchangeApdu(apdu: Buffer): Buffer {
  * (0x04) — a single-APDU exchange, per docs/LEDGER_HEDERA_RESEARCH.md (issue
  * 3.1a). Requires a connected, unlocked Ledger with the Hedera app open.
  *
- * Synchronous: `node-hid`'s underlying write/read calls genuinely block, so
- * this can be called directly wherever a synchronous
- * `(payload) => signature` callback is required (see apps/broker/src/signer.ts).
+ * Runs the actual (blocking) device I/O in a worker thread (worker.ts) —
+ * `node-hid`'s underlying write/read calls genuinely block, for as long as
+ * the user takes to physically confirm on-device, and this must never
+ * stall a server's main event loop. This function itself is safe to call
+ * directly from request-handling code; it returns as soon as it's
+ * dispatched to the worker and resolves/rejects once the worker replies.
  */
-export function signHederaPayload(rawTransactionBody: Buffer, keyIndex = 0): Buffer {
-  const apdu = buildSignTransactionApdu(keyIndex, rawTransactionBody);
-  const response = exchangeApdu(apdu);
-  return parseSignTransactionResponse(response);
+export function signHederaPayload(rawTransactionBody: Buffer, keyIndex = 0): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const request: SignWorkerRequest = { rawTransactionBody, keyIndex };
+    const worker = new Worker(resolveWorkerScriptPath(), { workerData: request });
+
+    worker.once("message", (response: SignWorkerResponse) => {
+      if (response.ok) {
+        resolve(Buffer.from(response.signature));
+      } else {
+        reject(new Error(response.error));
+      }
+      void worker.terminate();
+    });
+
+    worker.once("error", (error: Error) => {
+      reject(error);
+    });
+
+    worker.once("exit", (exitCode: number) => {
+      if (exitCode !== 0) {
+        reject(new Error(`ledger-signer: worker exited unexpectedly with code ${exitCode}`));
+      }
+    });
+  });
 }
