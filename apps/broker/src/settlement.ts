@@ -22,6 +22,11 @@ import {
 } from "@paybound/settlement";
 import type { SubmittedPaymentState } from "@paybound/capability-spec";
 import { resolveSubmission, type SubmissionOutcome } from "./state-machine.js";
+import {
+  persistHederaTxId,
+  getRecoverableSubmissions,
+  resolveRecoverableByNonce,
+} from "./state-machine.js";
 
 export interface SettlementDeps {
   readonly submitToHedera: (submitted: SubmittedPaymentState) => Promise<HederaSubmissionResult>;
@@ -72,6 +77,10 @@ export function isSettlementConfigured(): boolean {
  *  - `submitToHedera` throws outright (never dispatched, no transaction ID
  *    exists at all) -> "unknown", nothing to reconcile against yet.
  *
+ * Gap 1 fix: persists the Hedera transaction ID to `payment_submissions`
+ * as soon as it's known (before receipt confirmation), so a future startup
+ * sweep (`sweepRecoverablePayments`) can reconcile it even after a crash.
+ *
  * `deps` defaults to the real @paybound/settlement functions; tests pass a
  * fake object directly, with no module mocking required.
  */
@@ -90,6 +99,11 @@ export async function settleAndRecord(
     transactionId = result.transactionId;
     status = result.status ?? undefined;
     outcome = result.outcome;
+
+    // Gap 1 fix: persist the transaction ID immediately — before receipt
+    // confirmation — so a broker crash/restart can still reconcile this
+    // payment via sweepRecoverablePayments().
+    persistHederaTxId(submitted.capability.nonce, transactionId);
 
     if (outcome === "unknown") {
       try {
@@ -125,6 +139,53 @@ export async function settleAndRecord(
       console.error(
         `[AUDIT] settlement: logSettlementOutcome failed for tx ${transactionId}: ` +
           `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+}
+
+/**
+ * On-startup reconciliation sweep for RECOVERABLE payments (Gap 1 fix).
+ *
+ * Queries `payment_submissions` for any rows with `status = 'RECOVERABLE'`
+ * that have a persisted `hedera_transaction_id` (set by `settleAndRecord`
+ * before any crash), then reconciles each via
+ * `queryHederaTransactionReceipt` — which now includes a mirror-node
+ * fallback (Gap 2 fix) that works regardless of how long ago the original
+ * submission happened.
+ *
+ * Designed to be called once at broker startup, fire-and-forget. Per
+ * CAPABILITY_SPEC.md: a definitive outcome resolves the payment to SETTLED
+ * or FAILED; a throw leaves it RECOVERABLE for the next startup sweep.
+ * Never double-submits — it only re-queries an existing transaction ID,
+ * never calls `submitToHedera` again.
+ *
+ * `deps` defaults to the real @paybound/settlement functions; tests pass a
+ * fake object directly, with no module mocking required.
+ */
+export async function sweepRecoverablePayments(
+  deps: Pick<SettlementDeps, "queryHederaTransactionReceipt"> = defaultDeps,
+): Promise<void> {
+  if (!isSettlementConfigured()) return;
+
+  const recoverable = getRecoverableSubmissions();
+  if (recoverable.length === 0) return;
+
+  console.log(`[AUDIT] reconciliation: sweeping ${recoverable.length} RECOVERABLE payment(s) on startup`);
+
+  for (const { nonce, hederaTxId } of recoverable) {
+    try {
+      const result = await deps.queryHederaTransactionReceipt(hederaTxId);
+      resolveRecoverableByNonce(nonce, result.outcome);
+      console.log(
+        `[AUDIT] reconciliation: resolved nonce ${nonce.slice(0, 8)}… → ${result.outcome} ` +
+          `(tx: ${hederaTxId}, status: ${result.status})`,
+      );
+    } catch (error) {
+      // Still unresolvable — leave RECOVERABLE for the next startup sweep.
+      console.error(
+        `[AUDIT] reconciliation: still unresolved for nonce ${nonce.slice(0, 8)}… ` +
+          `(tx: ${hederaTxId}): ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
