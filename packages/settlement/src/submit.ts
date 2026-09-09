@@ -84,11 +84,28 @@ export interface HederaReconciliationResult {
  * transaction's receipt directly from the network, by ID — the correct
  * recovery path per CAPABILITY_SPEC.md, not a blind retry (which would
  * risk double-submission).
+ * Reconciles a RECOVERABLE payment by re-querying the transaction receipt,
+ * using a two-stage fallback:
  *
  * Throws if the network still can't produce a definitive answer (e.g. the
  * receipt hasn't propagated yet, or another timeout) — callers should
  * treat a throw here as "still unknown," not as a failure, and leave the
  * payment RECOVERABLE for a later attempt.
+ * Stage 1 — consensus-node `TransactionReceiptQuery` (fast, same-session):
+ *   Works reliably within ~3 minutes of consensus. After that, the receipt
+ *   expires from the node's cache and the query throws `RECEIPT_NOT_FOUND`
+ *   regardless of whether the transaction succeeded — confirmed empirically
+ *   against real testnet (see issue that introduced this change).
+ *
+ * Stage 2 — Hedera mirror-node REST API (permanent, no expiry):
+ *   Falls back here on any throw from Stage 1. The mirror node indexes
+ *   every transaction permanently. This is the only mechanism that can
+ *   resolve a crash-recovered RECOVERABLE payment (CAPABILITY_SPEC.md's
+ *   named motivating case) when the broker restarts more than ~3 minutes
+ *   after the original submission.
+ *
+ * Still throws if both stages fail — callers treat a throw as "still
+ * unknown" and leave the payment RECOVERABLE for a later sweep attempt.
  */
 export async function queryHederaTransactionReceipt(
   transactionId: string,
@@ -99,5 +116,71 @@ export async function queryHederaTransactionReceipt(
     .setValidateStatus(false)
     .execute(client);
   const status = receipt.status.toString();
+  // Stage 1: consensus node (fast path, short receipt window)
+  try {
+    const client = getHederaClient();
+    const receipt = await new TransactionReceiptQuery()
+      .setTransactionId(TransactionId.fromString(transactionId))
+      .setValidateStatus(false)
+      .execute(client);
+    const status = receipt.status.toString();
+    return { outcome: status === "SUCCESS" ? "settled" : "failed", transactionId, status };
+  } catch {
+    // Receipt not found on consensus node — either expired from cache or
+    // not yet propagated. Fall through to the permanent mirror-node record.
+  }
+
+  // Stage 2: mirror-node REST API (permanent record, no expiry window)
+  return queryHederaMirrorNode(transactionId);
+}
+
+/**
+ * Queries the Hedera Testnet mirror-node REST API for the outcome of a
+ * transaction by ID. Mirror-node records are permanent — unlike the
+ * consensus-node receipt cache, they do not expire. This is the correct
+ * mechanism for reconciling RECOVERABLE payments when the broker restarts
+ * long after the original submission.
+ *
+ * Transaction ID format accepted: either the standard SDK format
+ * (`0.0.XXXXX@seconds.nanos`) or the mirror-node dash format
+ * (`0.0.XXXXX-seconds-nanos`) — both are normalised internally.
+ *
+ * Throws if the mirror node returns a non-2xx response or no transaction
+ * record is found — callers should treat this as "still unknown."
+ */
+export async function queryHederaMirrorNode(
+  transactionId: string,
+): Promise<HederaReconciliationResult> {
+  // Convert SDK format (0.0.XXXXX@seconds.nanos) to mirror-node dash format
+  // (0.0.XXXXX-seconds-nanos). Already-dashed IDs pass through unchanged.
+  const mirrorId = transactionId.includes("@")
+    ? (() => {
+        const atIdx = transactionId.indexOf("@");
+        const account = transactionId.slice(0, atIdx);
+        const timestamp = transactionId.slice(atIdx + 1);
+        const dotIdx = timestamp.indexOf(".");
+        const seconds = dotIdx >= 0 ? timestamp.slice(0, dotIdx) : timestamp;
+        const nanos = dotIdx >= 0 ? timestamp.slice(dotIdx + 1) : "0";
+        return `${account}-${seconds}-${nanos}`;
+      })()
+    : transactionId;
+
+  const url = `https://testnet.mirrornode.hedera.com/api/v1/transactions/${encodeURIComponent(mirrorId)}`;
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(
+      `Mirror node query failed: HTTP ${response.status} for transaction ${transactionId}`,
+    );
+  }
+
+  const data = (await response.json()) as { transactions?: Array<{ result: string }> };
+  const tx = data.transactions?.[0];
+
+  if (tx === undefined) {
+    throw new Error(`Mirror node: no transaction record found for ID ${transactionId}`);
+  }
+
+  const status = tx.result;
   return { outcome: status === "SUCCESS" ? "settled" : "failed", transactionId, status };
 }
