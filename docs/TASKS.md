@@ -179,9 +179,13 @@ Do this only after Phases 1–4 are solid, and treat it as cuttable if time runs
       Policy question: confidential per-resource spending cap. Integration
       point: `apps/broker/src/routes/issue.ts` line 36, before `issueCapability()`.
 
-- [ ] **5.2** Integrate the Chainlink CRE confidential policy check as an
+- [x] **5.2** Integrate the Chainlink CRE confidential policy check as an
       optional pre-check before capability issuance, clearly gated so its
       failure/removal doesn't affect the core invariant. Depends on 5.1. *(Settlement)*
+      → **Done** — `apps/broker/src/cre-policy.ts`. Fail-open at every error
+      path. Documented in `docs/CAPABILITY_SPEC.md §"Chainlink CRE optional
+      policy check"`. 11 tests: 3 gating, 4 error fail-open, 3 happy-path,
+      1 route-level unreachable fail-open.
 
 ## Phase 6 — Integration, Demo, and Submission
 
