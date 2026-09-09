@@ -73,8 +73,21 @@ payRoute.post(
     // (docs/PROTOCOL.md §1). Awaiting here (rather than blocking) is what
     // keeps a slow/pending Ledger signature from stalling other in-flight
     // requests — see signer.ts's `ledgerSign`.
-    const submitted = await submitPayment(result.state, resolveSigner());
-
-    return c.json({ state: publicSubmittedPaymentStateSchema.parse(submitted) }, 200);
+    try {
+      const submitted = await submitPayment(result.state, resolveSigner());
+      return c.json({ state: publicSubmittedPaymentStateSchema.parse(submitted) }, 200);
+    } catch (err) {
+      // The RESERVED transition above already burned the nonce and
+      // reserved budget; a signer failure here (e.g. an unreachable
+      // Ledger/Speculos device, an on-device rejection, or a timeout)
+      // leaves the payment stuck at RESERVED rather than resolving to
+      // SUBMITTED. Reconciling that into a FAILED/RECOVERABLE transition
+      // is tracked separately (docs/TASKS.md 4.3) — this only ensures the
+      // caller gets a structured error instead of Hono's default
+      // plain-text 500, which the sandbox's payTool can't parse as JSON.
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[AUDIT] pay: signer failed for capability ${capabilityId}: ${message}`);
+      return c.json({ error: "signer_failed", message }, 502);
+    }
   },
 );
