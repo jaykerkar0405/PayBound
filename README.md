@@ -21,6 +21,7 @@ PayBound separates an agent's reasoning from its financial authority. An agent t
   - [Formal Invariant](#formal-invariant)
   - [Trust Boundary](#trust-boundary)
 - [Architecture](#architecture)
+- [Running It Locally](#running-it-locally)
 - [Project Status](#project-status)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
@@ -156,6 +157,51 @@ SUPPORTING SERVICES (useful, not load-bearing for the core guarantee)
 ```
 
 Removing any supporting service does not weaken the core guarantee. The capability schema, broker, and sandbox isolation are sufficient on their own.
+
+## Running It Locally
+
+Prerequisites: Node `>=24`, `pnpm@11.3.0` (see `package.json#packageManager`), and Docker (used by the sandbox's own container and by Speculos, below).
+
+```bash
+pnpm install
+pnpm build
+```
+
+### Broker (`apps/broker`)
+
+Copy `apps/broker/.env.example` to `.env.local` (or export the same variables) and adjust as needed. The most important one: `LEDGER_SIGNING_ENABLED` defaults to `true`, which routes every payment through the real Ledger-backed signer (`@paybound/ledger-signer`) against [Speculos](https://github.com/LedgerHQ/speculos), Ledger's device emulator — there is no physical Ledger in this project. Start Speculos first, in its own terminal (the wrapper script needs a TTY):
+
+```bash
+packages/ledger-signer/speculos/start.sh
+```
+
+Then, in another terminal:
+
+```bash
+pnpm --filter broker dev   # or: pnpm --filter broker build && pnpm --filter broker start
+```
+
+`GET /health` and `POST /pay` are the only two HTTP routes. **There is currently no HTTP route or CLI to seed the resource registry, create a task budget, or issue a capability** — `seedRegistry`/`createTask`/`issueCapability` (`apps/broker/src/registry.ts`, `budget.ts`, `issuer.ts`) are only ever invoked from the test suite today. To drive `/pay` manually, call those functions yourself from a one-off script pointed at the broker's `DB_PATH`, or read `apps/broker/src/__tests__/pay-route.test.ts` for a worked example.
+
+Without a running Speculos instance (and with `LEDGER_SIGNING_ENABLED` left at its default `true`), both `pnpm --filter broker test` and any real `POST /pay` call will fail — the test suite fails fast with an explicit error; a live `/pay` call instead hangs until the signer's own timeout and then returns a 500. Set `LEDGER_SIGNING_ENABLED=false` to fall back to the Phase 1 stub signer if you don't need real signing.
+
+### Sandbox (`apps/sandbox`)
+
+Copy `apps/sandbox/.env.example` to `.env.local`. `BROKER_HOST` defaults to `host.docker.internal`, which only resolves when the sandbox runs inside its own Docker container (`apps/sandbox/Dockerfile`); point it at `127.0.0.1` (or wherever the broker is listening) when running the sandbox directly on the host.
+
+```bash
+pnpm --filter sandbox dev
+```
+
+Note: this entrypoint (`apps/sandbox/src/index.ts`'s `main()`) only establishes the sandbox's attested workload identity and logs it — it does not run the agent loop or make any payment. The actual agent loop (`runAgentLoop`/`runSandboxLifecycle` in `apps/sandbox/src/agent.ts`) is currently exercised only by the test suite and by `apps/sandbox/demo/network-boundary-demo.sh` (which demonstrates the network egress boundary, not a payment). To containerize and run the sandbox's egress isolation live, see that script and `apps/sandbox/Dockerfile`.
+
+### Demo dashboard (`apps/demo`)
+
+```bash
+pnpm --filter demo dev
+```
+
+This is currently the unmodified SvelteKit scaffold — it does not yet render anything PayBound-specific or talk to the broker. Wiring it up is tracked as Phase 6 in `docs/TASKS.md`.
 
 ## Project Status
 
