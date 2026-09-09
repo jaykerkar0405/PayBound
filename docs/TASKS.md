@@ -172,9 +172,13 @@ can start once 1.7 exists.
 Explicitly bounded scope; not load-bearing for the core security guarantee.
 Do this only after Phases 1–4 are solid, and treat it as cuttable if time runs short.
 
-- [ ] **5.1** Define the specific policy question Chainlink CRE will evaluate
+- [x] **5.1** Define the specific policy question Chainlink CRE will evaluate
       confidentially (e.g., a resource-vetting or spend-policy check) and where
       it plugs into the capability issuance flow (1.3). Depends on 1.3. *(Settlement)*
+      → **Done** — see [`docs/CHAINLINK_CRE_DESIGN.md`](./CHAINLINK_CRE_DESIGN.md).
+      Policy question: confidential per-resource spending cap. Integration
+      point: `apps/broker/src/routes/issue.ts` line 36, before `issueCapability()`.
+
 - [x] **5.2** Integrate the Chainlink CRE confidential policy check as an
       optional pre-check before capability issuance, clearly gated so its
       failure/removal doesn't affect the core invariant. Depends on 5.1. *(Settlement)*
