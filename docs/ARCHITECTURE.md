@@ -68,7 +68,7 @@ PayBound is three components, each with a distinct trust posture:
 | Capability validation | `packages/capability-spec` | Runtime (Zod) validation of capabilities at the trust boundary |
 | Broker↔Sandbox protocol | `packages/protocol` | Wire protocol for the `pay(capability_id)` channel, including attested identity handshake |
 | Key management | `packages/ledger-signer` | Ledger-backed signing infrastructure for the Broker (optional trust service, not load-bearing) |
-| Settlement + audit | `packages/settlement` | Settlement network integration and externally verifiable audit evidence (optional trust service, not load-bearing) |
+| Settlement + audit | `packages/settlement` | Settlement network integration and externally verifiable audit evidence (optional trust service, not load-bearing for the *security invariant* — but wired into `apps/broker`'s live request flow as of task 4.1, docs/SETTLEMENT_INTEGRATION_PROPOSAL.md "Design A", so it *is* expected to run during the live demo) |
 
 ## The three-moment demo (illustrative example)
 
@@ -108,7 +108,13 @@ OPTIONAL TRUST SERVICES (valuable, not load-bearing)
 ```
 
 Removing any of the optional services does not break the core guarantee.
-That's a deliberate design property, not a gap.
+That's a deliberate design property, not a gap — this stays true even now
+that Settlement/HCS is actually wired into `apps/broker`'s live request
+flow (task 4.1): it runs fire-and-forget, after the payment has already
+reached `SUBMITTED`, entirely decoupled from `Broker.authorize`'s decision
+(docs/PROTOCOL.md §1). If Hedera credentials are unset or unreachable, a
+payment simply stays at `SUBMITTED` rather than advancing to `SETTLED` —
+the invariant that got it there was never in question.
 
 ## What this doc is NOT
 

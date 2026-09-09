@@ -10,6 +10,8 @@ import { getTask } from "../budget.js";
 import { authorize } from "../authorize.js";
 import { submitPayment } from "../state-machine.js";
 import { resolveSigner } from "../signer.js";
+import { auditAuthorizationDecision } from "../hcs-audit.js";
+import { settleAndRecord } from "../settlement.js";
 
 /**
  * POST /pay — the single wire call the agent sandbox is allowed to make
@@ -62,19 +64,43 @@ payRoute.post(
 
     const result = authorize({ payment, capability: record.capability, task });
 
+    // Fire-and-forget HCS audit log (task 4.2) — logged for every decision,
+    // authorized or not; never awaited, never able to affect the response.
+    void auditAuthorizationDecision({
+      eventType: "authorization_decision",
+      timestamp: new Date().toISOString(),
+      taskHash: record.capability.taskHash,
+      resourceId: record.capability.resourceId,
+      authorized: result.authorized,
+      reason: result.authorized ? null : result.reason,
+    });
+
     if (!result.authorized) {
       return c.json({ authorized: false, reason: result.reason }, 200);
     }
 
     // result.state is the real ReservedPaymentState authorize() produced
     // as part of the RESERVED transition — used directly, not
-    // reconstructed. This awaits through SUBMITTED only: settlement
-    // (resolveSubmission) is deliberately not called here
-    // (docs/PROTOCOL.md §1). Awaiting here (rather than blocking) is what
-    // keeps a slow/pending Ledger signature from stalling other in-flight
-    // requests — see signer.ts's `ledgerSign`.
+    // reconstructed. This awaits through SUBMITTED only: full settlement
+    // confirmation (settleAndRecord, below) is deliberately not awaited
+    // here (docs/PROTOCOL.md §1). Awaiting submitPayment (rather than
+    // blocking) is what keeps a slow/pending Ledger signature from
+    // stalling other in-flight requests — see signer.ts's `ledgerSign`.
     try {
       const submitted = await submitPayment(result.state, resolveSigner());
+
+      // Fire-and-forget: settles on Hedera and resolves SUBMITTED ->
+      // SETTLED/FAILED/RECOVERABLE (task 4.1) in the background, after
+      // this response has already gone out. settleAndRecord catches
+      // everything it can anticipate internally; this .catch is only a
+      // last-resort guard against something truly unexpected escaping it.
+      void settleAndRecord(submitted).catch((error: unknown) => {
+        console.error(
+          `[AUDIT] pay: settlement continuation failed unexpectedly for capability ${capabilityId}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+
       return c.json({ state: publicSubmittedPaymentStateSchema.parse(submitted) }, 200);
     } catch (err) {
       // The RESERVED transition above already burned the nonce and

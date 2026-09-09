@@ -49,8 +49,10 @@ function resolveLedgerTransport(): LedgerTransportConfig {
  * `buildSignableHederaTransactionBody` (hedera-transaction-body.ts) rather
  * than sending it as-is; see that module's doc comment for why and for the
  * "known limitation" this implies (no real recipient/amount encoded here —
- * that's `hederaTransactionSigner` below's job, once real settlement is
- * wired in).
+ * that would be `hederaTransactionSigner` below's job, if real settlement
+ * ever routes its signing through the Ledger instead of the separate
+ * operator key it uses today — see
+ * docs/SETTLEMENT_INTEGRATION_PROPOSAL.md "Design B").
  *
  * `transportOverride` exists for testability (forcing a specific transport
  * regardless of `config.ledgerTransport`, which — like the rest of
@@ -85,8 +87,12 @@ export async function ledgerSign(
  * already be a real, fully-formed `TransactionBody` encoding (that's what
  * `@hashgraph/sdk`'s `signWith` hands its signer callback), so it needs no
  * wrapping — this is the seam `ledgerSign`'s doc comment refers to as
- * where a real recipient/amount will actually flow through once
- * packages/settlement is wired into this flow.
+ * where a real recipient/amount would flow through, if settlement's
+ * signing ever moves from its own separate operator key (task 4.1,
+ * `packages/settlement`'s `submitToHedera` — see settlement.ts) onto the
+ * Ledger. Not currently called from anywhere in this codebase; see
+ * docs/SETTLEMENT_INTEGRATION_PROPOSAL.md "Design B" for what that would
+ * require.
  *
  * `transportOverride`: see `ledgerSign`'s doc comment.
  */

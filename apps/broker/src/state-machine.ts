@@ -215,10 +215,17 @@ export type SubmissionOutcome = "settled" | "failed" | "unknown";
  * "failed" -> FAILED (a definitive negative result, no reconciliation
  * needed), "unknown" -> RECOVERABLE (no confirmation received; the correct
  * next step is reconciliation by transaction ID against the settlement
- * network, not a blind retry — reconciliation itself is out of scope here,
- * gated on real Hedera settlement, tasks 4.1/4.3). In Phase 1, with no real
- * settlement network, `outcome` is supplied by the caller rather than
- * derived from a real response.
+ * network, not a blind retry). This function only maps `outcome` to the
+ * right transition — it doesn't talk to Hedera or decide what `outcome`
+ * is itself; `outcome` is always supplied by the caller.
+ *
+ * As of task 4.1 (docs/SETTLEMENT_INTEGRATION_PROPOSAL.md "Design A"),
+ * that caller is `apps/broker/src/settlement.ts`'s `settleAndRecord`,
+ * called fire-and-forget from routes/pay.ts after a payment reaches
+ * SUBMITTED — it calls `packages/settlement`'s `submitToHedera` (and, for
+ * "unknown", one immediate `queryHederaTransactionReceipt` reconciliation
+ * attempt) and passes the real derived outcome in here. This function's
+ * own transition logic is unchanged by that wiring.
  */
 export function resolveSubmission(
   submitted: SubmittedPaymentState,
