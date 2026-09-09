@@ -12,8 +12,8 @@ describe("ledgerSign / hederaTransactionSigner", () => {
   // exercise the real device-discovery failure path end to end (device.ts's
   // openLedgerDevice) rather than the on-device signing itself.
 
-  it("throws a clear error when no Ledger device is connected", () => {
-    expect(() => ledgerSign("payload")).toThrow(/no Ledger device found/);
+  it("rejects with a clear error when no Ledger device is connected", async () => {
+    await expect(ledgerSign("payload")).rejects.toThrow(/no Ledger device found/);
   });
 
   it("rejects with the same device-discovery error via the signWith-compatible async seam", async () => {

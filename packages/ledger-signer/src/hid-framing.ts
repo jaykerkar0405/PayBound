@@ -9,7 +9,45 @@
  * HID interface directly (see device.ts) rather than depending on that
  * package — `hw-app-hedera` never exposes INS_SIGN_TRANSACTION (see
  * docs/LEDGER_HEDERA_RESEARCH.md), so only the framing layer is reused here,
- * by re-implementation, not the app-specific JS wrapper.
+ * by re-implementation, not the app-specific JS wrapper. `device.ts`'s
+ * `writeHidBlock` (the leading 0x00 HID report-ID byte prepended to every
+ * write) and `index.ts`'s write-then-read exchange loop shape are likewise
+ * modeled on that same file's `TransportNodeHid.js` counterpart.
+ *
+ * Source (verified directly, not guessed):
+ *   Package:     @ledgerhq/hw-transport-node-hid-noevents
+ *   Version:     6.36.0 (npm, dist-tag "latest" as of this port)
+ *   Files:       lib/hid-framing.js, lib/TransportNodeHid.js (published
+ *                build artifacts — these are what was actually read/ported)
+ *   Repository:  https://github.com/LedgerHQ/ledger-live.git (per that
+ *                package's own package.json "repository" field)
+ *   gitHead:     dd0dea64b58e5a9125c8a422dcffd29e5ef6abec (recorded in the
+ *                published package's own metadata as the commit it was
+ *                built from; note this SHA is not currently reachable via
+ *                GitHub's API on the live LedgerHQ/ledger-live repo — likely
+ *                due to a later history rewrite/rebase in that monorepo —
+ *                so it's cited as provenance, not as a live, browsable link)
+ *
+ * License note: this package's own package.json declares "Apache-2.0", but
+ * the LICENSE.txt file actually bundled and published inside the package
+ * (i.e. the license instrument that actually governs the distributed code)
+ * is the MIT License, "Copyright (c) 2017-present Ledger
+ * https://www.ledger.com/". That inconsistency is Ledger's own package
+ * metadata, not something introduced here. Treating the bundled MIT text
+ * as authoritative: MIT is compatible with this project's own MIT license
+ * (see /LICENSE) and only requires the copyright/permission notice be
+ * preserved in copies/substantial portions, which this comment does:
+ *
+ *   Copyright (c) 2017-present Ledger https://www.ledger.com/
+ *   Permission is hereby granted, free of charge, to any person obtaining a
+ *   copy of this software and associated documentation files (the
+ *   "Software"), to deal in the Software without restriction, including
+ *   without limitation the rights to use, copy, modify, merge, publish,
+ *   distribute, sublicense, and/or sell copies of the Software, subject to
+ *   the following conditions: the above copyright notice and this
+ *   permission notice shall be included in all copies or substantial
+ *   portions of the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT
+ *   WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
  */
 
 const HID_PACKET_SIZE = 64;
