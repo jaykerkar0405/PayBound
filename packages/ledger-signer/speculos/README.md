@@ -88,7 +88,7 @@ docker run --rm -it \
 This matches `apps/broker/src/config.ts`'s defaults
 (`LEDGER_TRANSPORT=speculos`, `LEDGER_SPECULOS_HOST=127.0.0.1`,
 `LEDGER_SPECULOS_PORT=9999`) — `pnpm --filter broker test` expects an
-instance already running at that host/port (`apps/broker/src/__tests__/setup.speculos.ts`
+instance already running at that host/port (`apps/broker/src/__tests__/global-setup.speculos.ts`
 checks connectivity and fails fast with this same instruction if it isn't,
 and auto-approves the on-device review screens for the duration of the test
 run — see that file's comment for why review-screen automation belongs
