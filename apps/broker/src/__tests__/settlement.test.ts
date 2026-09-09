@@ -5,7 +5,17 @@ import { seedRegistry } from "../registry.js";
 import { issueCapability } from "../issuer.js";
 import { createTask } from "../budget.js";
 import { reservePayment, submitPayment } from "../state-machine.js";
-import { settleAndRecord, isSettlementConfigured, type SettlementDeps } from "../settlement.js";
+import {
+  settleAndRecord,
+  sweepRecoverablePayments,
+  isSettlementConfigured,
+  type SettlementDeps,
+} from "../settlement.js";
+import type { HederaReconciliationResult } from "@paybound/settlement";
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
 
 async function setUpSubmitted() {
   const taskHash = randomUUID();
@@ -33,6 +43,15 @@ function submissionStatus(nonce: string): string | null {
   return row?.status ?? null;
 }
 
+function hederaTxIdForNonce(nonce: string): string | null {
+  const row = db
+    .prepare<[string], { hedera_transaction_id: string | null }>(
+      "SELECT hedera_transaction_id FROM payment_submissions WHERE nonce = ?",
+    )
+    .get(nonce);
+  return row?.hedera_transaction_id ?? null;
+}
+
 function fakeDeps(overrides: Partial<SettlementDeps> = {}): SettlementDeps {
   return {
     submitToHedera: vi.fn(),
@@ -41,6 +60,10 @@ function fakeDeps(overrides: Partial<SettlementDeps> = {}): SettlementDeps {
     ...overrides,
   };
 }
+
+// ---------------------------------------------------------------------------
+// isSettlementConfigured
+// ---------------------------------------------------------------------------
 
 describe("isSettlementConfigured", () => {
   const original = {
@@ -73,6 +96,10 @@ describe("isSettlementConfigured", () => {
     expect(isSettlementConfigured()).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// settleAndRecord — core outcome mapping
+// ---------------------------------------------------------------------------
 
 describe("settleAndRecord", () => {
   const original = {
@@ -212,5 +239,118 @@ describe("settleAndRecord", () => {
       await expect(settleAndRecord(submitted, deps)).resolves.toBeUndefined();
       expect(submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// settleAndRecord — Gap 1: hedera_transaction_id persistence
+// ---------------------------------------------------------------------------
+
+describe("settleAndRecord — Gap 1: hedera_transaction_id persistence", () => {
+  const orig2 = {
+    accountId: process.env.HEDERA_TESTNET_ACCOUNT_ID,
+    privateKey: process.env.HEDERA_TESTNET_PRIVATE_KEY,
+  };
+  afterEach(() => {
+    if (orig2.accountId === undefined) delete process.env.HEDERA_TESTNET_ACCOUNT_ID;
+    else process.env.HEDERA_TESTNET_ACCOUNT_ID = orig2.accountId;
+    if (orig2.privateKey === undefined) delete process.env.HEDERA_TESTNET_PRIVATE_KEY;
+    else process.env.HEDERA_TESTNET_PRIVATE_KEY = orig2.privateKey;
+  });
+  beforeEach(() => {
+    process.env.HEDERA_TESTNET_ACCOUNT_ID = "0.0.1234";
+    process.env.HEDERA_TESTNET_PRIVATE_KEY = "302e...";
+  });
+
+  it("persists hedera_transaction_id after a settled outcome", async () => {
+    const submitted = await setUpSubmitted();
+    const txId = "0.0.1@500.0";
+    await settleAndRecord(submitted, fakeDeps({
+      submitToHedera: vi.fn().mockResolvedValue({ outcome: "settled", transactionId: txId, status: "SUCCESS" }),
+    }));
+    expect(hederaTxIdForNonce(submitted.capability.nonce)).toBe(txId);
+  });
+
+  it("persists hedera_transaction_id even when the payment ends up RECOVERABLE", async () => {
+    const submitted = await setUpSubmitted();
+    const txId = "0.0.1@501.0";
+    await settleAndRecord(submitted, fakeDeps({
+      submitToHedera: vi.fn().mockResolvedValue({ outcome: "unknown", transactionId: txId, status: null }),
+      queryHederaTransactionReceipt: vi.fn().mockRejectedValue(new Error("RECEIPT_NOT_FOUND")),
+    }));
+    expect(submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
+    expect(hederaTxIdForNonce(submitted.capability.nonce)).toBe(txId);
+  });
+
+  it("does NOT persist hedera_transaction_id when submitToHedera throws (never dispatched)", async () => {
+    const submitted = await setUpSubmitted();
+    await settleAndRecord(submitted, fakeDeps({
+      submitToHedera: vi.fn().mockRejectedValue(new Error("network error")),
+    }));
+    expect(hederaTxIdForNonce(submitted.capability.nonce)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sweepRecoverablePayments (Gap 1 + Gap 2 combined)
+// ---------------------------------------------------------------------------
+
+describe("sweepRecoverablePayments", () => {
+  const orig3 = {
+    accountId: process.env.HEDERA_TESTNET_ACCOUNT_ID,
+    privateKey: process.env.HEDERA_TESTNET_PRIVATE_KEY,
+  };
+  afterEach(() => {
+    if (orig3.accountId === undefined) delete process.env.HEDERA_TESTNET_ACCOUNT_ID;
+    else process.env.HEDERA_TESTNET_ACCOUNT_ID = orig3.accountId;
+    if (orig3.privateKey === undefined) delete process.env.HEDERA_TESTNET_PRIVATE_KEY;
+    else process.env.HEDERA_TESTNET_PRIVATE_KEY = orig3.privateKey;
+  });
+
+  async function makeRecoverable(txId: string) {
+    process.env.HEDERA_TESTNET_ACCOUNT_ID = "0.0.1234";
+    process.env.HEDERA_TESTNET_PRIVATE_KEY = "302e...";
+    const submitted = await setUpSubmitted();
+    await settleAndRecord(submitted, fakeDeps({
+      submitToHedera: vi.fn().mockResolvedValue({ outcome: "unknown", transactionId: txId, status: null }),
+      queryHederaTransactionReceipt: vi.fn().mockRejectedValue(new Error("RECEIPT_NOT_FOUND")),
+    }));
+    return submitted;
+  }
+
+  it("resolves RECOVERABLE+txId to SETTLED when reconciliation confirms SUCCESS", async () => {
+    const submitted = await makeRecoverable("0.0.1@600.0");
+    await sweepRecoverablePayments({
+      queryHederaTransactionReceipt: vi.fn().mockResolvedValue({
+        outcome: "settled", transactionId: "0.0.1@600.0", status: "SUCCESS",
+      } satisfies HederaReconciliationResult),
+    });
+    expect(submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
+  });
+
+  it("resolves RECOVERABLE+txId to FAILED when reconciliation returns definitive failure", async () => {
+    const submitted = await makeRecoverable("0.0.1@601.0");
+    await sweepRecoverablePayments({
+      queryHederaTransactionReceipt: vi.fn().mockResolvedValue({
+        outcome: "failed", transactionId: "0.0.1@601.0", status: "INSUFFICIENT_ACCOUNT_BALANCE",
+      } satisfies HederaReconciliationResult),
+    });
+    expect(submissionStatus(submitted.capability.nonce)).toBe("FAILED");
+  });
+
+  it("leaves RECOVERABLE untouched and does not throw when reconciliation still fails", async () => {
+    const submitted = await makeRecoverable("0.0.1@602.0");
+    await expect(sweepRecoverablePayments({
+      queryHederaTransactionReceipt: vi.fn().mockRejectedValue(new Error("mirror: not found yet")),
+    })).resolves.toBeUndefined();
+    expect(submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
+  });
+
+  it("is a no-op when settlement credentials are not configured", async () => {
+    delete process.env.HEDERA_TESTNET_ACCOUNT_ID;
+    delete process.env.HEDERA_TESTNET_PRIVATE_KEY;
+    const queryFn = vi.fn();
+    await sweepRecoverablePayments({ queryHederaTransactionReceipt: queryFn });
+    expect(queryFn).not.toHaveBeenCalled();
   });
 });
