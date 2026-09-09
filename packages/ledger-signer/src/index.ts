@@ -46,14 +46,32 @@ export function signHederaPayload(
   return new Promise((resolve, reject) => {
     const request: SignWorkerRequest = { rawTransactionBody, keyIndex, transport };
     const worker = new Worker(resolveWorkerScriptPath(), { workerData: request });
+    // Set once a real response has arrived, so the "exit" handler below
+    // knows a subsequent exit is this function's own `worker.terminate()`
+    // call finishing, not a crash — `terminate()` does not guarantee exit
+    // code 0 for a forced stop, so without this flag that self-initiated
+    // exit would otherwise race the settlement below and reject a call
+    // that actually succeeded.
+    let responded = false;
 
     worker.once("message", (response: SignWorkerResponse) => {
-      if (response.ok) {
-        resolve(Buffer.from(response.signature));
-      } else {
-        reject(new Error(response.error));
-      }
-      void worker.terminate();
+      responded = true;
+      // Awaited before settling (not fire-and-forget): this worker's exit
+      // is confirmed complete before the caller's promise resolves, so a
+      // caller awaiting each `signHederaPayload` call in turn (as every
+      // caller in this codebase does) never has two workers' lifecycles
+      // overlapping. That overlap is exactly the scenario in which a
+      // non-context-aware native addon like `node-hid` (see device.ts's
+      // `openLedgerDevice` doc comment) intermittently throws "Module did
+      // not self-register" when loaded into a second Worker while a prior
+      // one hasn't fully torn down yet (nodejs/node#21481).
+      void worker.terminate().finally(() => {
+        if (response.ok) {
+          resolve(Buffer.from(response.signature));
+        } else {
+          reject(new Error(response.error));
+        }
+      });
     });
 
     worker.once("error", (error: Error) => {
@@ -61,7 +79,7 @@ export function signHederaPayload(
     });
 
     worker.once("exit", (exitCode: number) => {
-      if (exitCode !== 0) {
+      if (!responded && exitCode !== 0) {
         reject(new Error(`ledger-signer: worker exited unexpectedly with code ${exitCode}`));
       }
     });

@@ -1,13 +1,13 @@
 import { parentPort, workerData } from "node:worker_threads";
-import { signHederaPayloadSync, signHederaPayloadViaSpeculos } from "./sign.js";
+import { signHederaPayloadOverHid, signHederaPayloadViaSpeculos } from "./sign.js";
 import type { SignWorkerRequest, SignWorkerResponse } from "./worker-protocol.js";
 
 /**
  * The worker_threads entry point that keeps the actual (blocking) Ledger
  * device I/O off the server's main thread — see index.ts's
  * `signHederaPayload` for why this exists. Everything in this file runs in
- * its own V8 isolate; `signHederaPayloadSync` blocking here only stalls
- * this worker, never the process's main event loop.
+ * its own V8 isolate; `signHederaPayloadOverHid`'s device I/O blocking here
+ * only stalls this worker, never the process's main event loop.
  */
 if (parentPort === null) {
   throw new Error("ledger-signer worker.ts must only be run as a node:worker_threads Worker");
@@ -47,7 +47,7 @@ async function run(port: NonNullable<typeof parentPort>): Promise<void> {
     const signature =
       transport.kind === "speculos"
         ? await signHederaPayloadViaSpeculos(body, keyIndex, transport.host, transport.port)
-        : signHederaPayloadSync(body, keyIndex);
+        : await signHederaPayloadOverHid(body, keyIndex);
     const response: SignWorkerResponse = { ok: true, signature };
     port.postMessage(response);
   } catch (error) {
