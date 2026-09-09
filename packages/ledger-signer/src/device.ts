@@ -1,5 +1,5 @@
 import { Socket } from "node:net";
-import { HID, devices as listHidDevices, type Device } from "node-hid";
+import type { HID, Device } from "node-hid";
 
 /** Ledger's registered USB vendor ID (`@ledgerhq/devices`' `ledgerUSBVendorId`). */
 const LEDGER_USB_VENDOR_ID = 0x2c97;
@@ -12,15 +12,30 @@ function isLedgerHidInterface(device: Device): boolean {
     : device.interface === 0;
 }
 
-/** Opens the first connected Ledger device's HID interface, or throws. */
-export function openLedgerDevice(): HID {
+/**
+ * Opens the first connected Ledger device's HID interface, or throws.
+ *
+ * Dynamically imports `node-hid` here rather than at module top-level so
+ * that a worker thread using the `speculos` transport (the vast majority —
+ * see worker.ts) never loads node-hid's native addon at all. This isn't
+ * just laziness: node-hid isn't built context-aware, so loading it into a
+ * *second* `worker_threads` Worker within the same process is unsupported
+ * and intermittently throws "Module did not self-register" (see
+ * nodejs/node#21481) — spawning a fresh Worker per sign call (index.ts)
+ * means every unrelated Speculos-transport call was needlessly loading it
+ * too, multiplying how often that race could be hit. Scoping the import to
+ * only the `hid` transport's actual call path leaves exactly the two real
+ * `hid`-transport loads this package ever does per process.
+ */
+export async function openLedgerDevice(): Promise<HID> {
+  const { HID: HIDDevice, devices: listHidDevices } = await import("node-hid");
   const device = listHidDevices(LEDGER_USB_VENDOR_ID, 0x0).find(isLedgerHidInterface);
   if (device?.path === undefined) {
     throw new Error(
       "ledger device: no Ledger device found. Connect it, unlock it, and open the Hedera app.",
     );
   }
-  return new HID(device.path);
+  return new HIDDevice(device.path);
 }
 
 /**
