@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { issueRequestSchema } from "@paybound/capability-spec";
 import { issueCapability } from "../issuer.js";
+import { checkSpendPolicy } from "../cre-policy.js";
 
 /**
  * POST /issue — HTTP endpoint for capability issuance.
@@ -29,9 +30,24 @@ issueRoute.post(
       return c.json({ error: "invalid_request", message: result.error.message }, 400);
     }
   }),
-  (c) => {
+  async (c) => {
     const { taskDefinition, resourceId, exactAmount, paymentRequest, session } =
       c.req.valid("json");
+
+    // Optional Chainlink CRE confidential spend-policy check (task 5.2).
+    // Non-load-bearing: if disabled, misconfigured, or unreachable,
+    // checkSpendPolicy returns { allowed: true } and issuance continues
+    // exactly as it does without this check. Only an explicit { allowed:
+    // false } from a reachable, enabled CRE gateway blocks issuance.
+    // See docs/CHAINLINK_CRE_DESIGN.md and CAPABILITY_SPEC.md §"Chainlink
+    // CRE optional policy check" for the full design rationale.
+    const creResult = await checkSpendPolicy(resourceId, exactAmount);
+    if (!creResult.allowed) {
+      return c.json(
+        { error: "spend_policy_exceeded", message: creResult.reason },
+        403,
+      );
+    }
 
     try {
       const result = issueCapability({
