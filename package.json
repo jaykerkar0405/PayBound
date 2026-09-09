@@ -11,9 +11,9 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
+    "lint:root": "eslint .",
     "test": "turbo run test",
     "check-types": "turbo run check-types",
-    "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
