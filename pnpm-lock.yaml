@@ -41,6 +41,9 @@ importers:
       '@paybound/capability-spec':
         specifier: workspace:*
         version: link:../../packages/capability-spec
+      '@paybound/ledger-signer':
+        specifier: workspace:*
+        version: link:../../packages/ledger-signer
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
@@ -116,7 +119,15 @@ importers:
         specifier: ^4.5.4
         version: 4.5.4
 
-  packages/ledger-signer: {}
+  packages/ledger-signer:
+    dependencies:
+      node-hid:
+        specifier: ^3.4.0
+        version: 3.4.0
+    devDependencies:
+      '@types/node':
+        specifier: ^26.4.1
+        version: 26.4.1
 
   packages/protocol: {}
 
@@ -1863,6 +1874,11 @@ packages:
     resolution: {integrity: sha512-VijLXbi3UACN69I0JVXJsX4tjACjNoQDgv2gTF6sx2wWEi8tkSg2eX8p5gSIFi8z2+DL3oHmY6OyKce38SDolg==}
     engines: {node: ^18 || ^20 || >= 21}
 
+  node-hid@3.4.0:
+    resolution: {integrity: sha512-Br7EO3bJARAJBdtcsGzF/Vs5TjfbkaMdglqLQ+Rk9GOGgVqv5DxYUVH5znLerJU+OfBWw8sd552Ujcprz1bG9g==}
+    engines: {node: '>=10.16'}
+    hasBin: true
+
   node-int64@0.4.0:
     resolution: {integrity: sha512-O5lz91xSOeoXP6DulyHfllpq+Eg00MWitZIbtPfoSEvqIHdl5gfcY6hYzDWnj0qD5tz52PI08u9qUvSVeUBeHw==}
 
@@ -1947,6 +1963,11 @@ packages:
 
   pino@10.1.0:
     resolution: {integrity: sha512-0zZC2ygfdqvqK8zJIr1e+wT1T/L+LF6qvqvbzEQ6tiMAoTqEVK9a1K3YRu8HEUvGEvNqZyPJTtb2sNIoTkB83w==}
+    hasBin: true
+
+  pkg-prebuilds@1.1.0:
+    resolution: {integrity: sha512-jyai+KTQ2OwbN6iRYw88XbYOMgtpoSYJpjYebx7d9ihqz3txNi3ucsBt3va0iVWe6svSlaqpijMHFF/eJCMZzg==}
+    engines: {node: '>= 14.15.0'}
     hasBin: true
 
   postcss@8.5.28:
@@ -4244,6 +4265,11 @@ snapshots:
 
   node-addon-api@8.9.2: {}
 
+  node-hid@3.4.0:
+    dependencies:
+      node-addon-api: 8.9.2
+      pkg-prebuilds: 1.1.0
+
   node-int64@0.4.0: {}
 
   node-releases@2.0.54: {}
@@ -4339,6 +4365,8 @@ snapshots:
       safe-stable-stringify: 2.5.0
       sonic-boom: 4.2.1
       thread-stream: 3.2.0
+
+  pkg-prebuilds@1.1.0: {}
 
   postcss@8.5.28:
     dependencies:
