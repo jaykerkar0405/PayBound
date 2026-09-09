@@ -51,6 +51,20 @@ export interface Config {
   readonly hederaTestnetPrivateKey: string | undefined;
   /** HCS topic ID for the audit trail (task 4.2), created once via `packages/settlement`'s `createAuditTopic()`. `undefined` until provisioned — see .env.example. */
   readonly hederaHcsTopicId: string | undefined;
+  /**
+   * Gates the Chainlink CRE confidential spend-policy check (task 5.2).
+   * Defaults **off** — issuance works exactly as today when false.
+   * This is explicitly optional and non-load-bearing: removing or
+   * disabling it does not affect any of the 9 invariant clauses.
+   * See docs/CHAINLINK_CRE_DESIGN.md for the policy question and
+   * docs/CAPABILITY_SPEC.md §"Chainlink CRE optional policy check".
+   */
+  readonly creEnabled: boolean;
+  /**
+   * URL of the Chainlink CRE policy gateway endpoint. Only consulted
+   * when `creEnabled` is true. `undefined` when not configured.
+   */
+  readonly creGatewayUrl: string | undefined;
 }
 
 function parseLedgerTransport(value: string | undefined): LedgerTransportKind {
@@ -73,4 +87,6 @@ export const config: Config = {
   hederaTestnetAccountId: process.env.HEDERA_TESTNET_ACCOUNT_ID,
   hederaTestnetPrivateKey: process.env.HEDERA_TESTNET_PRIVATE_KEY,
   hederaHcsTopicId: process.env.HEDERA_HCS_TOPIC_ID,
+  creEnabled: process.env.CRE_ENABLED === "true",
+  creGatewayUrl: process.env.CRE_GATEWAY_URL,
 };
