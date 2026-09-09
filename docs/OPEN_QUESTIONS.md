@@ -33,41 +33,36 @@ Decision: `packages/types` has been updated to use
 `STALE_NONCE` (the other 5 values were already correct). `docs/PROTOCOL.md`
 §4 has been updated to match.
 
-## Ledger signing curve mismatch (blocks task 3.1)
+## Resolved: Ledger signing curve mismatch (task 3.1a)
 
-**Status:** Unresolved. Blocking.
+**Status:** Resolved 2026-09-09.
 
-`docs/TECH_STACK_ADR.md` specifies `@ledgerhq/hw-app-eth` for the Ledger
-integration (`packages/ledger-signer`), which signs using secp256k1
-(Ethereum-style signing). Hedera, however, natively uses the Ed25519 curve
-for account keys and transaction signing.
+Previously: `docs/TECH_STACK_ADR.md` specified `@ledgerhq/hw-app-eth` for
+the Ledger integration (`packages/ledger-signer`), which signs using
+secp256k1 (Ethereum-style signing). Hedera, however, natively uses the
+Ed25519 curve for account keys and transaction signing — a real mismatch,
+not just a naming detail, since `hw-app-eth` cannot produce Ed25519
+signatures and a Ledger device signs with whichever app matches the
+target curve. This mattered before task 3.1 itself, too: the Phase 1 stub
+signer (tasks 1.5/1.6) needed to produce payment signatures in the same
+shape/curve the real Ledger-backed signer would eventually produce, so the
+curve couldn't be left undecided until 3.1 started without risking rework
+of the stub signer and anything built against its output (state machine
+transitions, `Broker.authorize` checks, property tests).
 
-This is a real mismatch, not just a naming detail: `hw-app-eth` cannot
-produce Ed25519 signatures, and a Ledger device signs with whichever app
-(Ethereum app vs. a curve-appropriate alternative) matches the target
-curve. If the broker's signer is expected to produce signatures Hedera will
-accept, the Ledger-side app/library chosen in task 3.1 needs to match
-Hedera's curve, not necessarily `hw-app-eth`.
-
-**Why this matters now, not just at task 3.1:** the Phase 1 stub signer
-(tasks 1.5/1.6) needs to produce payment signatures in the same
-shape/curve that the real Ledger-backed signer (task 3.1) will eventually
-produce. If the curve is decided only when task 3.1 starts, the stub
-signer and any code built against its output (state machine transitions,
-`Broker.authorize` checks, property tests) may need to be reworked.
-
-**What needs to happen:** whoever picks up Ledger research should confirm,
-before 1.5/1.6 are implemented:
-
-- Which curve/signature scheme the settlement path actually requires
-  (this may depend on whether settlement is on Hedera directly, or via an
-  EVM-compatible path such as Hedera's JSON-RPC relay, which would bring
-  secp256k1 back into play).
-- Which Ledger app and library support that curve (e.g. a Hedera-specific
-  Ledger app, or a generic curve app, if `hw-app-eth` doesn't apply).
-
-This question is intentionally left open here — no resolution is proposed,
-only the conflict and its downstream impact.
+Decision: **ECDSA secp256k1**, not Ed25519 — Hedera now recommends
+secp256k1 as the default curve for new accounts/apps (per
+docs.hedera.com); Ed25519 remains legacy/supported but is not the
+recommended default. `hw-app-eth` still isn't the right library, though:
+`@ledgerhq/hw-app-eth` is deprecated and, more importantly, Hedera has its
+own dedicated Ledger device app (`LedgerHQ/app-hedera`) that does not sign
+through the Ethereum app. That device app defines a real signing
+instruction, `INS_SIGN_TRANSACTION` (`0x04`), confirmed as a single-APDU
+exchange (not a multi-step/streamed protocol) — see
+`docs/LEDGER_HEDERA_RESEARCH.md` for the full investigation and evidence
+(issue 3.1a). Task 3.1b implements a minimal custom APDU client against
+this instruction rather than routing through `hw-app-eth` or the
+incomplete `@ledgerhq/hw-app-hedera` JS wrapper.
 
 ## Resolved: violation-type labeling in SECURITY_INVARIANT.md (task 0.3.1)
 
