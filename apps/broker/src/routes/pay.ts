@@ -36,7 +36,7 @@ payRoute.post(
       return c.json({ error: "invalid_capability_id", message: result.error.message }, 400);
     }
   }),
-  (c) => {
+  async (c) => {
     const { capabilityId } = c.req.valid("json");
 
     const record = getCapabilityRecord(capabilityId);
@@ -68,10 +68,12 @@ payRoute.post(
 
     // result.state is the real ReservedPaymentState authorize() produced
     // as part of the RESERVED transition — used directly, not
-    // reconstructed. This call is synchronous through SUBMITTED only:
-    // settlement (resolveSubmission) is deliberately not called here
-    // (docs/PROTOCOL.md §1).
-    const submitted = submitPayment(result.state, resolveSigner());
+    // reconstructed. This awaits through SUBMITTED only: settlement
+    // (resolveSubmission) is deliberately not called here
+    // (docs/PROTOCOL.md §1). Awaiting here (rather than blocking) is what
+    // keeps a slow/pending Ledger signature from stalling other in-flight
+    // requests — see signer.ts's `ledgerSign`.
+    const submitted = await submitPayment(result.state, resolveSigner());
 
     return c.json({ state: publicSubmittedPaymentStateSchema.parse(submitted) }, 200);
   },
