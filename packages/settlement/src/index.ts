@@ -3,6 +3,7 @@ export { createHederaClient, getHederaClient } from "./hedera-client.js";
 export {
     submitToHedera,
     queryHederaTransactionReceipt,
+    queryHederaMirrorNode,
     type HederaSubmissionResult,
     type HederaReconciliationResult,
 } from "./submit.js";
