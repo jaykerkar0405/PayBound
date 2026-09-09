@@ -6,11 +6,14 @@ set -e
 # ==============================================================================
 # In Task 2.2, apps/sandbox/network/egress-policy.sh is wired to run automatically
 # at container startup before application code runs.
-# It enforces:
-# 1. Outbound public web access (HTTP/HTTPS, DNS).
-# 2. Complete block of host/gateway network (payment infrastructure stand-ins).
-# 3. Single explicit exception: Broker channel ($BROKER_HOST:$BROKER_PORT).
-# 4. If CAP_NET_ADMIN is absent, maintains zero-network baseline (fails closed).
+# It enforces a default-deny OUTPUT policy with explicit carve-outs:
+# 1. Outbound public web access on ports 80/443 (HTTP/HTTPS, DNS).
+# 2. Broker channel ($BROKER_HOST:$BROKER_PORT).
+# It then blocks the Docker host/gateway network and any named
+# payment-infrastructure targets ($PAYMENT_INFRA_HOST(S)) on top of that
+# baseline. See apps/sandbox/network/egress-policy.sh for the full policy
+# and docs/THREAT_MODEL.md for what this policy does and does not cover.
+# If CAP_NET_ADMIN is absent, maintains zero-network baseline (fails closed).
 # ==============================================================================
 
 # Apply egress policy automatically at startup if present
