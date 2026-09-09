@@ -9,7 +9,7 @@ import { getCapabilityRecord } from "../issuer.js";
 import { getTask } from "../budget.js";
 import { authorize } from "../authorize.js";
 import { submitPayment } from "../state-machine.js";
-import { stubSign } from "../signer.js";
+import { resolveSigner } from "../signer.js";
 
 /**
  * POST /pay — the single wire call the agent sandbox is allowed to make
@@ -71,7 +71,7 @@ payRoute.post(
     // reconstructed. This call is synchronous through SUBMITTED only:
     // settlement (resolveSubmission) is deliberately not called here
     // (docs/PROTOCOL.md §1).
-    const submitted = submitPayment(result.state, stubSign);
+    const submitted = submitPayment(result.state, resolveSigner());
 
     return c.json({ state: publicSubmittedPaymentStateSchema.parse(submitted) }, 200);
   },
