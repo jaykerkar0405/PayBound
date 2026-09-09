@@ -109,16 +109,16 @@ needs the broker's `pay()` endpoint (1.7).
       untrusted content and invoke the payment tool, with the capability issued
       by the trusted task definer *before* untrusted content is read. Depends
       on 2.4. *(Sandbox)*
-- [ ] **2.6** Build attack scenario 1: prompt injection attempting to redirect
+- [x] **2.6** Build attack scenario 1: prompt injection attempting to redirect
       payment destination/amount (should fail structurally — no field exists).
       Depends on 2.5. *(Sandbox)*
-- [ ] **2.7** Build attack scenario 2: injected instruction attempting to make
+- [x] **2.7** Build attack scenario 2: injected instruction attempting to make
       the agent sign/call payment infra directly, bypassing the broker
       (should fail — no signing key, no network path). Depends on 2.2, 2.5. *(Sandbox)*
-- [ ] **2.8** Build attack scenario 3: replay/reuse of a previously-used
+- [x] **2.8** Build attack scenario 3: replay/reuse of a previously-used
       capability_id or expired capability (should be rejected by broker's
       `authorize`). Depends on 1.8, 2.5. *(Sandbox)*
-- [ ] **2.9** Live demonstration harness for the network boundary claim: show
+- [x] **2.9** Live demonstration harness for the network boundary claim: show
       the sandbox's egress policy actually blocking direct calls to a
       wallet/facilitator/RPC, not just diagram it. Depends on 2.2. *(Sandbox)*
 
@@ -132,9 +132,13 @@ needs the broker's `pay()` endpoint (1.7).
       Fixed `docker run -it` failure in non-interactive contexts by adding
       `--detach` mode (`docker run -d`). See `docs/DEMO_SIGNING_APPROACH.md`
       and `packages/ledger-signer/speculos/`. PR #59. *(Settlement)*
-- [ ] **3.2** Swap the stub signer used in Phase 1 tests for the real
+- [x] **3.2** Swap the stub signer used in Phase 1 tests for the real
       Ledger-backed signer and re-run the property test suite (1.8) to confirm
-      behavior is unchanged. Depends on 3.1, 1.8. *(Sandbox)*
+      behavior is unchanged. Depends on 3.1, 1.8. *(Sandbox)* — done against
+      Speculos (LedgerHQ/app-hedera under emulation), not real hardware; see
+      `packages/ledger-signer/speculos/README.md` for why and how to
+      reproduce it. `LEDGER_SIGNING_ENABLED`/`LEDGER_TRANSPORT` now default
+      to real-signer/`speculos`.
 
 ## Phase 4 — Settlement & Audit Trail (Hedera/HCS)
 

@@ -9,7 +9,7 @@ import { getCapabilityRecord } from "../issuer.js";
 import { getTask } from "../budget.js";
 import { authorize } from "../authorize.js";
 import { submitPayment } from "../state-machine.js";
-import { stubSign } from "../signer.js";
+import { resolveSigner } from "../signer.js";
 
 /**
  * POST /pay — the single wire call the agent sandbox is allowed to make
@@ -36,7 +36,7 @@ payRoute.post(
       return c.json({ error: "invalid_capability_id", message: result.error.message }, 400);
     }
   }),
-  (c) => {
+  async (c) => {
     const { capabilityId } = c.req.valid("json");
 
     const record = getCapabilityRecord(capabilityId);
@@ -68,11 +68,26 @@ payRoute.post(
 
     // result.state is the real ReservedPaymentState authorize() produced
     // as part of the RESERVED transition — used directly, not
-    // reconstructed. This call is synchronous through SUBMITTED only:
-    // settlement (resolveSubmission) is deliberately not called here
-    // (docs/PROTOCOL.md §1).
-    const submitted = submitPayment(result.state, stubSign);
-
-    return c.json({ state: publicSubmittedPaymentStateSchema.parse(submitted) }, 200);
+    // reconstructed. This awaits through SUBMITTED only: settlement
+    // (resolveSubmission) is deliberately not called here
+    // (docs/PROTOCOL.md §1). Awaiting here (rather than blocking) is what
+    // keeps a slow/pending Ledger signature from stalling other in-flight
+    // requests — see signer.ts's `ledgerSign`.
+    try {
+      const submitted = await submitPayment(result.state, resolveSigner());
+      return c.json({ state: publicSubmittedPaymentStateSchema.parse(submitted) }, 200);
+    } catch (err) {
+      // The RESERVED transition above already burned the nonce and
+      // reserved budget; a signer failure here (e.g. an unreachable
+      // Ledger/Speculos device, an on-device rejection, or a timeout)
+      // leaves the payment stuck at RESERVED rather than resolving to
+      // SUBMITTED. Reconciling that into a FAILED/RECOVERABLE transition
+      // is tracked separately (docs/TASKS.md 4.3) — this only ensures the
+      // caller gets a structured error instead of Hono's default
+      // plain-text 500, which the sandbox's payTool can't parse as JSON.
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[AUDIT] pay: signer failed for capability ${capabilityId}: ${message}`);
+      return c.json({ error: "signer_failed", message }, 502);
+    }
   },
 );

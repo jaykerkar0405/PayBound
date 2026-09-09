@@ -102,29 +102,40 @@ describe("reservePayment", () => {
 });
 
 describe("submitPayment", () => {
-  it("returns a SubmittedPaymentState nesting the ReservedPaymentState, with a stub-signed payload", () => {
+  it("returns a SubmittedPaymentState nesting the ReservedPaymentState, with a stub-signed payload", async () => {
     const { taskHash, price, capabilityId } = setUpCapability();
     const reserved = reservePayment(capabilityId, taskHash, price);
     if (!reserved.ok) throw new Error("expected reservation to succeed");
 
     const stubSigner = (payload: string) => `stub-signature-of:${payload.length}`;
-    const submitted = submitPayment(reserved.state, stubSigner);
+    const submitted = await submitPayment(reserved.state, stubSigner);
 
     expect(submitted.status).toBe("SUBMITTED");
     expect(submitted.reservedFrom).toEqual(reserved.state);
   });
+
+  it("accepts an async signer (e.g. the real Ledger signer) just as well as a sync one", async () => {
+    const { taskHash, price, capabilityId } = setUpCapability();
+    const reserved = reservePayment(capabilityId, taskHash, price);
+    if (!reserved.ok) throw new Error("expected reservation to succeed");
+
+    const asyncSigner = async (payload: string) => `async-sig:${payload.length}`;
+    const submitted = await submitPayment(reserved.state, asyncSigner);
+
+    expect(submitted.status).toBe("SUBMITTED");
+  });
 });
 
 describe("resolveSubmission", () => {
-  function setUpSubmitted() {
+  async function setUpSubmitted() {
     const { taskHash, price, capabilityId } = setUpCapability();
     const reserved = reservePayment(capabilityId, taskHash, price);
     if (!reserved.ok) throw new Error("expected reservation to succeed");
     return submitPayment(reserved.state, (payload) => `sig:${payload.length}`);
   }
 
-  it("'settled' resolves to a SettledPaymentState nesting the SubmittedPaymentState", () => {
-    const submitted = setUpSubmitted();
+  it("'settled' resolves to a SettledPaymentState nesting the SubmittedPaymentState", async () => {
+    const submitted = await setUpSubmitted();
 
     const resolved = resolveSubmission(submitted, "settled");
 
@@ -132,8 +143,8 @@ describe("resolveSubmission", () => {
     expect(resolved.submittedFrom).toEqual(submitted);
   });
 
-  it("'failed' resolves to a FailedPaymentState nesting the SubmittedPaymentState", () => {
-    const submitted = setUpSubmitted();
+  it("'failed' resolves to a FailedPaymentState nesting the SubmittedPaymentState", async () => {
+    const submitted = await setUpSubmitted();
 
     const resolved = resolveSubmission(submitted, "failed");
 
@@ -141,8 +152,8 @@ describe("resolveSubmission", () => {
     expect(resolved.submittedFrom).toEqual(submitted);
   });
 
-  it("'unknown' resolves to a RecoverablePaymentState nesting the SubmittedPaymentState", () => {
-    const submitted = setUpSubmitted();
+  it("'unknown' resolves to a RecoverablePaymentState nesting the SubmittedPaymentState", async () => {
+    const submitted = await setUpSubmitted();
 
     const resolved = resolveSubmission(submitted, "unknown");
 
