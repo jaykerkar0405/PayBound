@@ -24,7 +24,7 @@ supports two transports, selected per call via the `transport` argument
   `exchangeApduOverSpeculos`). This is what `apps/broker` actually uses by
   default (task 3.2, issue 45) — see `speculos/README.md` in this package
   for what's checked in there and how to run it, and
-  `apps/broker/src/__tests__/setup.speculos.ts` for how the broker's own
+  `apps/broker/src/__tests__/global-setup.speculos.ts` for how the broker's own
   test suite drives it unattended.
 
 Both transports carry the exact same APDU (`src/apdu.ts`) over the exact

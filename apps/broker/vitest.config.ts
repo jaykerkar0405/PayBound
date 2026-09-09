@@ -11,10 +11,10 @@ export default defineProject({
     // in one worker, instead.
     fileParallelism: false,
     isolate: false,
-    // Wires up Speculos auto-approval (task 3.2) — see that file's doc
-    // comment. Relies on `isolate: false` above to run its top-level
-    // connectivity check/poller setup exactly once per `vitest run`, not
-    // once per test file.
-    setupFiles: ["./src/__tests__/setup.speculos.ts"],
+    // Provisions Speculos automatically (task 1.8 fix) and wires up its
+    // auto-approval poller (task 3.2) — see that file's doc comment.
+    // `globalSetup` runs exactly once per `vitest run` regardless of
+    // `isolate`/`fileParallelism`, unlike `setupFiles`.
+    globalSetup: ["./src/__tests__/global-setup.speculos.ts"],
   },
 });

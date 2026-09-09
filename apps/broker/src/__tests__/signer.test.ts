@@ -31,7 +31,7 @@ describe("ledgerSign / hederaTransactionSigner", () => {
     // Port 1 is a privileged port nothing in this test run is listening on
     // — proves the speculos transport's own failure path independently of
     // whether the broker test suite's own Speculos instance happens to be
-    // up (see setup.speculos.ts).
+    // up (see global-setup.speculos.ts).
     await expect(
       ledgerSign("payload", { kind: "speculos", host: "127.0.0.1", port: 1 }),
     ).rejects.toThrow();
