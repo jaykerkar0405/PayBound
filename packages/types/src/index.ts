@@ -1332,6 +1332,81 @@ function _assertPayRequestShape(x: z.infer<typeof payRequestSchema>): PayRequest
   return x;
 }
 
+// ---------------------------------------------------------------------------
+// POST /issue — capability issuance request
+// ---------------------------------------------------------------------------
+
+/**
+ * Schema for the POST /issue request body: the fields needed to call
+ * `issueCapability()` in apps/broker/src/issuer.ts. Built from the
+ * same field-level primitives used elsewhere in this file (uuidSchema,
+ * decimalSchema, publicKeySchema). `taskDefinition` and `paymentRequest`
+ * are kept as `z.unknown()` — their shapes are hashed, not validated,
+ * per issuer.ts's `IssueCapabilityInput` interface.
+ * @see apps/broker/src/issuer.ts `IssueCapabilityInput`
+ */
+export const issueRequestSchema = z
+  .object({
+    /**
+     * The canonical task definition; hashed into `taskHash` by the issuer.
+     * Accepted as unknown — its content is opaque to the broker.
+     */
+    taskDefinition: z.unknown(),
+    /**
+     * Must correspond to an entry already seeded in the resource registry.
+     * @see CAPABILITY_SPEC.md field: `resource_id`
+     */
+    resourceId: uuidSchema.describe(
+      "UUID of the resource registry entry to issue against (issuer.ts: IssueCapabilityInput.resourceId).",
+    ),
+    /**
+     * Must exactly match the registry entry's price — no dynamic pricing.
+     * @see CAPABILITY_SPEC.md field: `exact_amount`
+     */
+    exactAmount: decimalSchema.describe(
+      "Exact amount; must match the registry price for resourceId (issuer.ts: IssueCapabilityInput.exactAmount).",
+    ),
+    /**
+     * The specific payment request being vetted; hashed into
+     * `paymentRequestHash` by the issuer. Accepted as unknown.
+     */
+    paymentRequest: z.unknown(),
+    /**
+     * The sandbox's attested workload identity.
+     * @see CAPABILITY_SPEC.md field: `session`
+     */
+    session: publicKeySchema.describe(
+      "The sandbox's attested workload identity (issuer.ts: IssueCapabilityInput.session).",
+    ),
+  })
+  .readonly()
+  .describe("POST /issue request body — the fields required to issue a new Capability.");
+
+/**
+ * Request body for the POST /issue endpoint.
+ *
+ * Hand-written to preserve field-level hover JSDoc; kept in sync with
+ * `issueRequestSchema` by `_assertIssueRequestShape` below.
+ * @see apps/broker/src/issuer.ts `IssueCapabilityInput`
+ */
+export interface IssueRequest {
+  /** The canonical task definition; hashed (not stored) into taskHash. */
+  readonly taskDefinition: unknown;
+  /** UUID of the resource registry entry to issue against. */
+  readonly resourceId: Uuid;
+  /** Exact amount; must match the registry price for resourceId. */
+  readonly exactAmount: Decimal;
+  /** The specific payment request; hashed (not stored) into paymentRequestHash. */
+  readonly paymentRequest: unknown;
+  /** The sandbox's attested workload identity. */
+  readonly session: PublicKey;
+}
+
+/** Compile-time check that `issueRequestSchema` and `IssueRequest` stay in sync. */
+function _assertIssueRequestShape(x: z.infer<typeof issueRequestSchema>): IssueRequest {
+  return x;
+}
+
 /** Schema for the sandbox's payment tool call response; see the `PayResponse` type below for the full doc. */
 export const payResponseSchema = z
   .object({
