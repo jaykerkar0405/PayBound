@@ -181,7 +181,7 @@ Then, in another terminal:
 pnpm --filter broker dev   # or: pnpm --filter broker build && pnpm --filter broker start
 ```
 
-`GET /health` and `POST /pay` are the only two HTTP routes. **There is currently no HTTP route or CLI to seed the resource registry, create a task budget, or issue a capability** — `seedRegistry`/`createTask`/`issueCapability` (`apps/broker/src/registry.ts`, `budget.ts`, `issuer.ts`) are only ever invoked from the test suite today. To drive `/pay` manually, call those functions yourself from a one-off script pointed at the broker's `DB_PATH`, or read `apps/broker/src/__tests__/pay-route.test.ts` for a worked example.
+`GET /health`, `POST /issue`, and `POST /pay` are the three HTTP routes. `POST /issue` accepts `{ taskDefinition, resourceId, exactAmount, paymentRequest, session }`, atomically creates the task budget on first call for a given task hash, and returns `{ capabilityId, expiry }`. See `apps/broker/src/routes/issue.ts` and `apps/broker/src/__tests__/issue-route.test.ts` for the full schema and worked examples. To seed the resource registry before issuing, call `seedRegistry` from a one-off script pointed at the broker's `DB_PATH` (see `apps/broker/src/scripts/` for examples).
 
 Without a running Speculos instance (and with `LEDGER_SIGNING_ENABLED` left at its default `true`), both `pnpm --filter broker test` and any real `POST /pay` call will fail — the test suite fails fast with an explicit error; a live `/pay` call instead hangs until the signer's own timeout and then returns a 500. Set `LEDGER_SIGNING_ENABLED=false` to fall back to the Phase 1 stub signer if you don't need real signing.
 
@@ -193,7 +193,13 @@ Copy `apps/sandbox/.env.example` to `.env.local`. `BROKER_HOST` defaults to `hos
 pnpm --filter sandbox dev
 ```
 
-Note: this entrypoint (`apps/sandbox/src/index.ts`'s `main()`) only establishes the sandbox's attested workload identity and logs it — it does not run the agent loop or make any payment. The actual agent loop (`runAgentLoop`/`runSandboxLifecycle` in `apps/sandbox/src/agent.ts`) is currently exercised only by the test suite and by `apps/sandbox/demo/network-boundary-demo.sh` (which demonstrates the network egress boundary, not a payment). To containerize and run the sandbox's egress isolation live, see that script and `apps/sandbox/Dockerfile`.
+Note: this entrypoint (`apps/sandbox/src/index.ts`'s `main()`) only establishes the sandbox's attested workload identity and logs it. The full agent loop is driven by `apps/sandbox/src/live-run.ts`, which runs a real LLM (Gemini primary, Groq fallback) through the complete lifecycle — capability issuance, untrusted content fetch, payment, Hedera settlement. Run the entire path end-to-end with real credentials via:
+
+```bash
+pnpm e2e:live   # from the repo root — requires .env with HEDERA_ and LLM API key vars set
+```
+
+To containerize and run the sandbox's egress isolation live, see `apps/sandbox/demo/network-boundary-demo.sh` and `apps/sandbox/Dockerfile`.
 
 ### Demo dashboard (`apps/demo`)
 
