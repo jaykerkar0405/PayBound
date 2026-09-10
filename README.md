@@ -205,7 +205,40 @@ This is currently the unmodified SvelteKit scaffold — it does not yet render a
 
 ## Project Status
 
-PayBound is in early development. The specification (capability object, state machine, signing model, and formal invariant) is defined. The reference broker implementation, sandbox isolation, and agent integration are in progress.
+PayBound is **functionally complete** across all six implementation phases and has been verified end-to-end against a live running broker, real Hedera testnet settlement, and real HCS audit topics. The submission deadline is **September 13, 2026**.
+
+### Phase completion
+
+| Phase | Description | Status |
+|---|---|---|
+| **0** | Specification (THREAT_MODEL, SECURITY_INVARIANT, CAPABILITY_SPEC, ARCHITECTURE, PROTOCOL) | ✅ Complete |
+| **1** | Broker & Capability Core (issuer, state machine, `authorize`, `POST /pay`, `POST /issue`, property tests) | ✅ Complete |
+| **2** | Sandbox, Agent & Attack Scenarios (egress isolation, agent loop, 3 attack scenarios, network boundary demo) | ✅ Complete |
+| **3** | Key Management / Ledger Integration (Speculos-backed signing; real hardware deferred) | ✅ Complete\* |
+| **4** | Settlement & Audit Trail (Hedera testnet settlement, HCS audit trail, SUBMITTED→SETTLED/FAILED reconciliation) | ✅ Complete |
+| **5** | Chainlink CRE confidential policy check (design + optional gated integration) | ✅ Complete |
+| **6** | End-to-end integration & demo (`pnpm e2e:live`, real LLM provider, live agent entrypoint) | ✅ Core complete |
+
+\* Ledger signing is backed by the [Speculos](https://github.com/LedgerHQ/speculos) hardware emulator running the real `app-hedera.elf` binary — not a physical device. The emulator produces identical on-device confirmations and is the configuration used for all live verification runs.
+
+### What is verifiably working
+
+- **`POST /issue`** — capability issuance: validates resource + price, atomically creates the task budget, fires an HCS audit event, and returns a signed `{ capabilityId, expiry }`. Optional Chainlink CRE spend-cap check gated behind `CRE_ENABLED`.
+- **`POST /pay`** — payment execution: enforces all 9 invariant clauses from `SECURITY_INVARIANT.md` (replay protection, nonce burn, field matching, budget check, destination immutability), submits to Hedera testnet, persists settlement state.
+- **`SUBMITTED → SETTLED/FAILED` reconciliation** — two-stage lookup (consensus-node receipt → mirror-node REST fallback) with `hedera_transaction_id` persisted for startup sweep recovery after broker crash.
+- **HCS audit trail** — every capability issuance, authorization decision, and settlement outcome is logged as a Hedera Consensus Service message on topics `0.0.10423726` / `0.0.10423727`, independently verifiable on [HashScan](https://hashscan.io/testnet).
+- **Sandbox egress isolation** — Docker-based network policy blocks all routes to payment infrastructure (wallet, RPC, facilitator) except the single authenticated broker channel. Demonstrated live by `apps/sandbox/demo/network-boundary-demo.sh`.
+- **Attack scenario tests** — three adversarial scenarios (prompt injection targeting destination/amount, direct payment infra bypass, capability replay/reuse) all fail structurally, not by detection.
+- **Attestation handshake** — `POST /attest/challenge` + `POST /attest/verify` implemented in broker and sandbox (`ATTESTATION_ENABLED` flag; **off by default** in the demo configuration — the 9 invariant clauses hold regardless).
+- **`pnpm e2e:live`** — one command runs the full path: task definition → `POST /issue` → real LLM agent run with untrusted content → `POST /pay` → Hedera settlement → HCS log. Requires real `.env` credentials.
+
+### What is not yet complete
+
+- **6.2** — End-to-end walkthrough doc
+- **6.3** — Live demo script/recording
+- **6.5** — Final integrated property test pass
+- **6.6** — Submission packaging
+- **3.1** — Real Ledger hardware (Speculos emulator used throughout)
 
 ## Roadmap
 
