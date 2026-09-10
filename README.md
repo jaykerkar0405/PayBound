@@ -205,6 +205,7 @@ This is currently the unmodified SvelteKit scaffold — it does not yet render a
 
 ## Project Status
 
+PayBound is in early development. The specification (capability object, state machine, signing model, and formal invariant) is defined. The reference broker implementation, sandbox isolation, and agent integration are in progress.
 PayBound is **functionally complete** across all six implementation phases and has been verified end-to-end against a live running broker, real Hedera testnet settlement, and real HCS audit topics. The submission deadline is **September 13, 2026**.
 
 ### Phase completion
@@ -242,14 +243,16 @@ PayBound is **functionally complete** across all six implementation phases and h
 
 ## Roadmap
 
-- [ ] `SECURITY_INVARIANT.md`: formal statement of the invariant
-- [ ] `THREAT_MODEL.md`: full trusted/adversarial boundary definition
-- [ ] `CAPABILITY_SPEC.md`: capability object and state machine reference
-- [ ] Property tests against a broker stub covering replay, substitution, escalation, stale nonces, mismatched sessions, mismatched task hashes, concurrent payments, and malformed responses
-- [ ] Reference broker implementation
-- [ ] Sandbox network isolation layer
-- [ ] Reference agent integration
-- [ ] End-to-end example and walkthrough
+- [x] `SECURITY_INVARIANT.md`: formal statement of the invariant
+- [x] `THREAT_MODEL.md`: full trusted/adversarial boundary definition
+- [x] `CAPABILITY_SPEC.md`: capability object and state machine reference
+- [x] Property tests against a broker stub covering replay, substitution, escalation, stale nonces, mismatched sessions, mismatched task hashes, concurrent payments, and malformed responses
+- [x] Reference broker implementation (`POST /issue`, `POST /pay`, `Broker.authorize`)
+- [x] Sandbox network isolation layer (Docker egress policy, `network-boundary-demo.sh`)
+- [x] Reference agent integration (real LLM via `runSandboxLifecycle`, `apps/sandbox/src/live-run.ts`)
+- [x] End-to-end live path (`pnpm e2e:live`) — task definition → issuance → agent → payment → Hedera settlement + HCS log
+- [ ] End-to-end example and walkthrough doc (in progress — task 6.2)
+- [ ] Live demo script / recording (task 6.3)
 
 ## Contributing
 
