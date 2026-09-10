@@ -152,6 +152,22 @@ describe("Minimal Agent Loop & Ordering Invariant (Task 2.5)", () => {
     expect(result.paid).toBe(false);
   });
 
+  it("throws immediately when neither capabilityId nor issueCapability is provided, rather than fabricating a fake capability (audit finding 2.5)", async () => {
+    // Step 2 (capability acquisition) must fail before Step 3 (the agent
+    // loop) is ever reached — model is never called, so it's fine for it
+    // to have no configured steps at all.
+    const model = createMockModel([]);
+
+    await expect(
+      runSandboxLifecycle({
+        model,
+        contentText: "irrelevant — should never be reached",
+      }),
+    ).rejects.toThrow(
+      "runSandboxLifecycle: no capabilityId and no issueCapability callback provided",
+    );
+  });
+
   it("completes benign loop without invoking payment tool when content has no payment instructions", async () => {
     const fixedCapabilityId = capabilityIdSchema.parse(randomUUID());
     let payToolInvoked = false;
