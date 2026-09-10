@@ -145,15 +145,19 @@ task 5.2 (`packages/cre-policy/src/`).
 |---|---|---|
 | `true` (allowed) | Continue to `issueCapability()` | Normal path |
 | `false` (denied) | `403 spend_policy_exceeded` | CRE check failed |
-| CRE unreachable / timeout | `503 policy_check_unavailable` | Fail-closed: do not issue |
-| CRE returns invalid attestation | `503 policy_check_unavailable` | Treat as unreachable |
+| CRE disabled, unconfigured, unreachable, or returns a malformed response | Continue to `issueCapability()` | Fail-open: check is skipped, issuance proceeds |
 
-**Fail-closed on CRE errors**: if the CRE job is unreachable, the broker
-refuses to issue (503) rather than falling back to allowing issuance. This
-is consistent with the "optional but strictly additive" framing — the CRE
-check is only running in environments where it's configured, and in those
-environments, a broken CRE is a reason to stop, not a reason to skip the
-check.
+**Fail-open on CRE errors**: if the check is disabled, `CRE_GATEWAY_URL`
+isn't set, the gateway is unreachable, or its response can't be parsed,
+`checkSpendPolicy()` returns `{ allowed: true }` and issuance continues
+exactly as if the check had never run — the broker never refuses to issue
+because of a broken or absent CRE gateway. This is what actually makes the
+check "optional and non-load-bearing" per `docs/TASKS.md`: a fail-closed
+design would make CRE gateway availability load-bearing for `/issue`
+working at all, which is the opposite of the intent. See
+`apps/broker/src/cre-policy.ts` and `docs/CAPABILITY_SPEC.md`'s "Chainlink
+CRE optional policy check" section for the implementation and the
+non-load-bearing guarantee this table's design supports.
 
 ---
 

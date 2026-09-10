@@ -67,7 +67,8 @@ import { z, $brand } from "zod";
  */
 export const hashSchema = z
   .string()
-  .describe("An opaque content hash (CAPABILITY_SPEC.md field type: hash).");
+  .regex(/^[0-9a-f]{64}$/, "must be a 64-character lowercase hex SHA-256 digest")
+  .describe("An opaque content hash (CAPABILITY_SPEC.md field type: hash) — a lowercase hex SHA-256 digest, per hash.ts's hashCanonical, the sole producer of this field.");
 export type Hash = z.infer<typeof hashSchema>;
 
 /**
@@ -76,6 +77,7 @@ export type Hash = z.infer<typeof hashSchema>;
  */
 export const uuidSchema = z
   .string()
+  .uuid()
   .describe("A UUID identifying a trusted resource registry entry (CAPABILITY_SPEC.md field type: uuid).");
 export type Uuid = z.infer<typeof uuidSchema>;
 
@@ -97,6 +99,7 @@ export type Address = z.infer<typeof addressSchema>;
  */
 export const decimalSchema = z
   .string()
+  .regex(/^\d+(\.\d+)?$/, "must be a non-negative decimal number string (e.g. \"0.01\", \"10\")")
   .describe(
     "An exact decimal amount, encoded as a string to avoid floating-point drift (CAPABILITY_SPEC.md field type: decimal).",
   );
@@ -125,8 +128,9 @@ export type PublicKey = z.infer<typeof publicKeySchema>;
  */
 export const uniqueIdSchema = z
   .string()
+  .uuid()
   .describe(
-    "A single-use identifier burned atomically on use (CAPABILITY_SPEC.md field type: unique_id).",
+    "A single-use identifier burned atomically on use (CAPABILITY_SPEC.md field type: unique_id) — a UUID, per issuer.ts's sole producer (randomUUID()).",
   );
 export type UniqueId = z.infer<typeof uniqueIdSchema>;
 
@@ -137,6 +141,7 @@ export type UniqueId = z.infer<typeof uniqueIdSchema>;
  */
 export const timestampSchema = z
   .string()
+  .datetime()
   .describe("An ISO 8601 timestamp (CAPABILITY_SPEC.md field type: timestamp).");
 export type Timestamp = z.infer<typeof timestampSchema>;
 
@@ -883,12 +888,12 @@ function _assertRecoverablePaymentStateShape(
  * The `FAILED` state, reachable only from `SUBMITTED`: the submitted payment
  * did not settle.
  *
- * TODO: the specific triggering conditions for this transition are not
- * specified by the source docs — see docs/OPEN_QUESTIONS.md "RECOVERABLE /
- * FAILED transition triggers are not specified in the source" (relevant to
- * task 1.5). This schema only encodes the transition's reachability
- * (SUBMITTED -> FAILED), not its triggering condition.
- * @see CAPABILITY_SPEC.md "The payment state machine" — `FAILED`
+ * Triggering condition (resolved, task 0.3.1b — see
+ * docs/OPEN_QUESTIONS.md "Resolved: RECOVERABLE / FAILED transition
+ * triggers"): the settlement network returns a definitive negative result
+ * for the submitted transaction — a known, unambiguous outcome, requiring
+ * no reconciliation.
+ * @see CAPABILITY_SPEC.md "Triggering conditions for `RECOVERABLE` and `FAILED`"
  */
 export const failedPaymentStateSchema = z
   .object({
@@ -898,20 +903,20 @@ export const failedPaymentStateSchema = z
     submittedFrom: submittedPaymentStateSchema,
   })
   .readonly()
-  .describe("FAILED: reachable only from SUBMITTED; triggering conditions still open (see docs/OPEN_QUESTIONS.md).");
+  .describe("FAILED: reachable only from SUBMITTED, on a definitive negative settlement result (see CAPABILITY_SPEC.md).");
 /**
  * The `FAILED` state, reachable only from `SUBMITTED`: the submitted payment
  * did not settle.
  *
- * TODO: the specific triggering conditions for this transition are not
- * specified by the source docs — see docs/OPEN_QUESTIONS.md "RECOVERABLE /
- * FAILED transition triggers are not specified in the source" (relevant to
- * task 1.5). This type only encodes the transition's reachability
- * (SUBMITTED -> FAILED), not its triggering condition.
+ * Triggering condition (resolved, task 0.3.1b — see
+ * docs/OPEN_QUESTIONS.md "Resolved: RECOVERABLE / FAILED transition
+ * triggers"): the settlement network returns a definitive negative result
+ * for the submitted transaction — a known, unambiguous outcome, requiring
+ * no reconciliation.
  *
  * Hand-written to preserve field-level hover JSDoc; kept in sync with
  * `failedPaymentStateSchema` by `_assertFailedPaymentStateShape` below.
- * @see CAPABILITY_SPEC.md "The payment state machine" — `FAILED`
+ * @see CAPABILITY_SPEC.md "Triggering conditions for `RECOVERABLE` and `FAILED`"
  */
 export interface FailedPaymentState {
   readonly status: "FAILED";
@@ -1264,6 +1269,7 @@ export type PublicPaymentState =
 /** Schema for the sandbox-facing capability lookup key; see the `CapabilityId` type below for the full doc. */
 export const capabilityIdSchema = z
   .string()
+  .uuid()
   .brand<"CapabilityId">()
   .describe(
     "Opaque, non-security-bearing lookup key for pay(capability_id); distinct from Capability.nonce.",

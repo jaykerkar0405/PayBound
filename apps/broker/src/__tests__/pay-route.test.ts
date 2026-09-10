@@ -16,7 +16,7 @@ async function postPay(body: unknown) {
 }
 
 function setUpCapability(overrides: { price?: string; maxTotalSpend?: string } = {}) {
-  const taskHash = randomUUID();
+  const taskHash = hashCanonical(randomUUID());
   const resourceId = randomUUID();
   const price = overrides.price ?? "10.00";
 

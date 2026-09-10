@@ -163,6 +163,7 @@ describe("checkSpendPolicy — CRE enabled and functional", () => {
 import { app } from "../index.js";
 import { seedRegistry } from "../registry.js";
 import { createTask } from "../budget.js";
+import { hashCanonical } from "../hash.js";
 import { randomUUID } from "node:crypto";
 
 describe("POST /issue — CRE integration", () => {
@@ -180,7 +181,7 @@ describe("POST /issue — CRE integration", () => {
     delete process.env.CRE_ENABLED;
     const resourceId = randomUUID();
     seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price: "10.00" }]);
-    createTask(randomUUID(), "100.00");
+    createTask(hashCanonical(randomUUID()), "100.00");
 
     const res = await app.request("/issue", {
       method: "POST",
@@ -196,7 +197,7 @@ describe("POST /issue — CRE integration", () => {
     process.env.CRE_GATEWAY_URL = "http://127.0.0.1:19999/policy"; // nothing listening here
     const resourceId = randomUUID();
     seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price: "10.00" }]);
-    createTask(randomUUID(), "100.00");
+    createTask(hashCanonical(randomUUID()), "100.00");
 
     const res = await app.request("/issue", {
       method: "POST",
