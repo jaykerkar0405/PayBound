@@ -1,22 +1,19 @@
-import { generateKeyPairSync, sign, verify, createPublicKey, type KeyObject } from "node:crypto";
+import { generateKeyPairSync, sign } from "node:crypto";
+import { type AttestationProof, type PublicKey } from "@paybound/protocol";
 
 /**
- * Hex-encoded Ed25519 public key in SPKI DER format.
- * Matches `PublicKey` from `@paybound/types` (which is defined as a string).
+ * The proof shape and its verifier now live in `@paybound/protocol`, since
+ * both sides of the handshake need them and `apps/broker` cannot import
+ * `apps/sandbox`. Re-exported here so this module remains the single
+ * sandbox-side entry point for attestation (docs/PROTOCOL.md §5).
+ *
+ * What deliberately does NOT move: `generateSandboxAttestation` and the
+ * `createProof` closure below. They hold the ephemeral Ed25519 private
+ * key, which must never leave this process — so the signing half stays
+ * sandbox-local while only the public, verifying half is shared.
  */
-export type PublicKey = string;
-
-/**
- * Attestation proof returned during the channel handshake with the Broker.
- * Conforms to docs/PROTOCOL.md §5:
- * 1. Identity: publicKey matching the session field (PublicKey).
- * 2. Freshness / non-replay: ed25519 signature over a single-use challenge.
- */
-export interface AttestationProof {
-  readonly publicKey: PublicKey;
-  readonly challenge: string;
-  readonly signature: string;
-}
+export { verifyAttestationProof } from "@paybound/protocol";
+export type { AttestationProof, PublicKey } from "@paybound/protocol";
 
 /**
  * Sandbox-side interface for the attested workload identity.
@@ -53,37 +50,4 @@ export function generateSandboxAttestation(): SandboxAttestation {
       };
     },
   };
-}
-
-/**
- * Verifies an attestation proof against an expected challenge.
- * Used by verifiers (the Broker or test harness) to confirm identity and freshness.
- */
-export function verifyAttestationProof(
-  proof: AttestationProof,
-  expectedChallenge: string,
-): boolean {
-  if (!proof || !proof.publicKey || !proof.challenge || !proof.signature) {
-    return false;
-  }
-  if (proof.challenge !== expectedChallenge) {
-    return false;
-  }
-
-  try {
-    const keyObj: KeyObject = createPublicKey({
-      key: Buffer.from(proof.publicKey, "hex"),
-      format: "der",
-      type: "spki",
-    });
-
-    return verify(
-      null,
-      Buffer.from(proof.challenge, "utf-8"),
-      keyObj,
-      Buffer.from(proof.signature, "hex"),
-    );
-  } catch {
-    return false;
-  }
 }

@@ -1413,6 +1413,157 @@ function _assertIssueRequestShape(x: z.infer<typeof issueRequestSchema>): IssueR
   return x;
 }
 
+// ---------------------------------------------------------------------------
+// Attestation channel handshake (docs/PROTOCOL.md §5, task 2.3)
+//
+// Wire shapes only. The structural type for a proof and the verification
+// logic itself live in `@paybound/protocol` (`AttestationProof`,
+// `verifyAttestationProof`) — both apps need those, and neither app can
+// import the other. These schemas are the runtime-validation half, kept
+// here alongside every other wire shape per this file's own convention.
+// ---------------------------------------------------------------------------
+
+/**
+ * Schema for the `POST /attest/challenge` request body: the sandbox asks
+ * the Broker for a single-use challenge to sign, naming the workload
+ * identity it intends to prove possession of.
+ * @see docs/PROTOCOL.md §5
+ * @see docs/ATTESTATION_HANDSHAKE_DESIGN.md §1
+ */
+export const attestationChallengeRequestSchema = z
+  .object({
+    /** The sandbox's attested workload identity — the same value that becomes `session` on any capability issued for it. */
+    publicKey: publicKeySchema.describe(
+      "The sandbox's attested workload identity, hex-encoded Ed25519 SPKI DER (docs/PROTOCOL.md §5).",
+    ),
+  })
+  .readonly()
+  .describe("POST /attest/challenge request body — names the workload identity requesting a challenge.");
+
+/**
+ * Request body for `POST /attest/challenge`.
+ *
+ * Hand-written to preserve field-level hover JSDoc; kept in sync with
+ * `attestationChallengeRequestSchema` by `_assertAttestationChallengeRequestShape` below.
+ */
+export interface AttestationChallengeRequest {
+  /** The sandbox's attested workload identity. */
+  readonly publicKey: PublicKey;
+}
+
+/** Compile-time check that `attestationChallengeRequestSchema` and `AttestationChallengeRequest` stay in sync. */
+function _assertAttestationChallengeRequestShape(
+  x: z.infer<typeof attestationChallengeRequestSchema>,
+): AttestationChallengeRequest {
+  return x;
+}
+
+/**
+ * Schema for the `POST /attest/challenge` success response: the
+ * single-use, high-entropy challenge the sandbox must sign, and when it
+ * stops being accepted.
+ * @see docs/PROTOCOL.md §5
+ */
+export const attestationChallengeResponseSchema = z
+  .object({
+    /** Single-use, high-entropy random challenge the sandbox signs to prove live key possession. */
+    challenge: z
+      .string()
+      .describe("Single-use, high-entropy challenge string to be signed (docs/PROTOCOL.md §5)."),
+    /** ISO 8601 timestamp after which this challenge is no longer accepted. */
+    expiresAt: timestampSchema.describe(
+      "ISO 8601 timestamp after which this challenge is no longer accepted.",
+    ),
+  })
+  .readonly()
+  .describe("POST /attest/challenge response body — the challenge to sign, and its expiry.");
+
+/**
+ * Response body for `POST /attest/challenge`.
+ *
+ * Hand-written to preserve field-level hover JSDoc; kept in sync with
+ * `attestationChallengeResponseSchema` by `_assertAttestationChallengeResponseShape` below.
+ */
+export interface AttestationChallengeResponse {
+  /** Single-use challenge string to sign. */
+  readonly challenge: string;
+  /** ISO 8601 timestamp after which the challenge is no longer accepted. */
+  readonly expiresAt: Timestamp;
+}
+
+/** Compile-time check that `attestationChallengeResponseSchema` and `AttestationChallengeResponse` stay in sync. */
+function _assertAttestationChallengeResponseShape(
+  x: z.infer<typeof attestationChallengeResponseSchema>,
+): AttestationChallengeResponse {
+  return x;
+}
+
+/**
+ * Schema for the `POST /attest/verify` request body — the attestation
+ * proof itself, exactly as `createProof` (apps/sandbox/src/attestation.ts)
+ * produces it.
+ *
+ * The structural type for this shape is `AttestationProof` in
+ * `@paybound/protocol`, which is also what `verifyAttestationProof`
+ * accepts; this schema is deliberately kept structurally identical to it.
+ * There is no duplicate hand-written interface here because that type
+ * already exists (and is the one both sides of the handshake are defined
+ * against) — the Broker parses with this schema and hands the result
+ * straight to `verifyAttestationProof`, so the two are checked against
+ * each other at that call site.
+ * @see docs/PROTOCOL.md §5
+ */
+export const attestationProofSchema = z
+  .object({
+    /** The workload identity being proven — must match the publicKey the challenge was issued to. */
+    publicKey: publicKeySchema.describe(
+      "The workload identity being proven (docs/PROTOCOL.md §5).",
+    ),
+    /** The exact challenge string previously issued by the Broker. */
+    challenge: z.string().describe("The exact challenge string previously issued by the Broker."),
+    /** Hex-encoded Ed25519 signature over `challenge`. */
+    signature: z.string().describe("Hex-encoded Ed25519 signature over `challenge`."),
+  })
+  .readonly()
+  .describe("POST /attest/verify request body — the attestation proof { publicKey, challenge, signature }.");
+
+/**
+ * Schema for the `POST /attest/verify` success response: confirmation
+ * that the channel is attested, and for how long.
+ * @see docs/ATTESTATION_HANDSHAKE_DESIGN.md §2
+ */
+export const attestationVerifyResponseSchema = z
+  .object({
+    /** Always `true` on a 200 — a failed verification is a 401, not a `false` here. */
+    attested: z.literal(true).describe("Always true on success; failure is a 401, not attested:false."),
+    /** ISO 8601 timestamp after which this session must re-attest. */
+    expiresAt: timestampSchema.describe(
+      "ISO 8601 timestamp after which this session must re-attest.",
+    ),
+  })
+  .readonly()
+  .describe("POST /attest/verify response body — the attested window established by a valid proof.");
+
+/**
+ * Response body for `POST /attest/verify`.
+ *
+ * Hand-written to preserve field-level hover JSDoc; kept in sync with
+ * `attestationVerifyResponseSchema` by `_assertAttestationVerifyResponseShape` below.
+ */
+export interface AttestationVerifyResponse {
+  /** Always `true` on success. */
+  readonly attested: true;
+  /** ISO 8601 timestamp after which this session must re-attest. */
+  readonly expiresAt: Timestamp;
+}
+
+/** Compile-time check that `attestationVerifyResponseSchema` and `AttestationVerifyResponse` stay in sync. */
+function _assertAttestationVerifyResponseShape(
+  x: z.infer<typeof attestationVerifyResponseSchema>,
+): AttestationVerifyResponse {
+  return x;
+}
+
 /** Schema for the sandbox's payment tool call response; see the `PayResponse` type below for the full doc. */
 export const payResponseSchema = z
   .object({
