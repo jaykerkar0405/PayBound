@@ -162,7 +162,7 @@ authorize any individual payment. Only a valid capability does that
 equality check is one of the 9 invariant clauses, not a substitute for
 `Broker.authorize` as a whole).
 
-The channel handshake implements two concrete requirements (resolved in task 2.3):
+The channel handshake implements two concrete requirements (task 2.3):
 
 1. **Identity** — which sandbox workload this is, matching the `session`
    (`PublicKey`, per `packages/types`) that will be embedded in any
@@ -176,12 +176,78 @@ The channel handshake implements two concrete requirements (resolved in task 2.3
    is a live presentation of that identity, established before the agent
    was exposed to any untrusted content (per `THREAT_MODEL.md`), not a
    replayed attestation artifact from a previous or different session.
-   - _Mechanism:_ Challenge-response handshake. The Broker (or verifier) issues
+   - _Mechanism:_ Challenge-response handshake. The Broker issues
      a single-use, high-entropy random challenge string. The sandbox signs the
      challenge with its in-memory Ed25519 private key and returns the proof
      `{ publicKey, challenge, signature }`. The Broker verifies the signature
      against `publicKey` and confirms that `challenge` matches the issued
      nonce, proving live possession and preventing replay.
+
+### 5.1 Wire endpoints
+
+A challenge-response handshake needs two round trips — the Broker must
+generate and hand back a challenge before the sandbox can sign it — so
+this is two dedicated calls, deliberately kept out of `/issue` and `/pay`
+so their request shapes are unchanged (§2's "exactly one parameter" in
+particular):
+
+- **`POST /attest/challenge`** — request `{ publicKey }`, response
+  `{ challenge, expiresAt }`. The challenge is 32 random bytes,
+  hex-encoded, bound to that `publicKey`, and valid for
+  `ATTESTATION_CHALLENGE_TTL_MS` (default 60s). Issuing a new challenge
+  replaces any previous unused one for the same key.
+- **`POST /attest/verify`** — request is the proof
+  `{ publicKey, challenge, signature }`; response `{ attested: true, expiresAt }`.
+  The Broker checks the challenge is the one it issued to that key, that
+  it has not expired, and that the signature verifies
+  (`verifyAttestationProof`, `@paybound/protocol`). The challenge is
+  consumed on **any** attempt, successful or not, so it is genuinely
+  single-use.
+
+Both return **`404 attestation_not_enabled`** when the Broker is not
+running with `ATTESTATION_ENABLED=true` (§5.3). That is how a gated-off
+Broker advertises that it requires no handshake; the sandbox treats it as
+"not required" and proceeds.
+
+### 5.2 What a verified attestation authorises, and for how long
+
+A successful handshake records `publicKey` as attested for
+`ATTESTATION_TTL_MS` (default 30 minutes) in Broker-process memory —
+deliberately not persisted to SQLite, because attestation proves *current*
+live key possession, not a durable fact. A Broker restart requires a
+re-attest, which is correct rather than a gap.
+
+`/issue` and `/pay` then check that record. Neither gains a request field
+for it: `/issue` checks its existing `session`, and `/pay` — which carries
+only `capabilityId` — checks `record.capability.session`, the session the
+capability was bound to at issuance. An unattested session is rejected
+with **`401 attestation_required`**, distinct from
+`401 attestation_failed` (a handshake that was attempted and refused).
+
+Neither code is an `AuthorizationFailureReason`. Both are protocol-level
+pre-check failures in the same category as §6's 400/404 split: the request
+never reached the point of being a decision `Broker.authorize()` makes.
+Clause 5 (`payment.session == capability.session`) is untouched by all of
+this and remains plain field equality inside `Broker.authorize()`.
+
+### 5.3 Gating (`ATTESTATION_ENABLED`, default off)
+
+**The handshake is off by default and is not part of the as-shipped or
+as-demoed configuration.** With `ATTESTATION_ENABLED` unset or `false`,
+`/issue` and `/pay` behave exactly as they do without any of this, and
+`/attest/*` returns 404. When set to `true` the check is fail-**closed**:
+an unattested session is rejected. That deliberately differs from the
+Chainlink CRE check's fail-open design — CRE fails open because a
+third-party gateway can be unreachable, whereas attestation verification
+is a local check with no external dependency, so fail-open would make the
+flag a no-op.
+
+Attestation is defense-in-depth on top of the 9 invariant clauses, never a
+replacement for them, and it does not defend against a compromised sandbox
+(`THREAT_MODEL.md` excludes that explicitly — a compromised sandbox can
+generate its own keypair and attest with it). What it prevents is a third
+party presenting a `session` value it cannot prove live possession of.
+See `docs/ATTESTATION_HANDSHAKE_DESIGN.md` for the full design.
 
 ## 6. Error handling for malformed or unresolvable requests
 
@@ -229,7 +295,10 @@ formal-precision reasons given in §4.
 
 ## Open questions raised by this document
 
-One genuinely undecided item surfaced while writing this document and is
-tracked in `docs/OPEN_QUESTIONS.md` rather than resolved by assumption here:
+One genuinely undecided item surfaced while writing this document and was
+tracked in `docs/OPEN_QUESTIONS.md` rather than resolved by assumption
+here:
 
-- The specific attestation mechanism for the channel handshake (§5).
+- ~~The specific attestation mechanism for the channel handshake (§5).~~
+  **Resolved and implemented** (task 2.3): Ed25519 challenge-response over
+  the two endpoints in §5.1, gated off by default per §5.3.

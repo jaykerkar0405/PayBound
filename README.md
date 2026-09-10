@@ -93,7 +93,7 @@ The agent never holds a signing key and never invokes a signing primitive. Its o
 
 This closes off a whole class of attack, namely "inject an instruction telling the agent to sign arbitrary data," because there is no signing capability inside the agent's sandbox to hijack in the first place.
 
-The sandbox has its own attested workload identity, established before the agent is exposed to any untrusted content. That identity authenticates the channel to the broker; it does not, by itself, authorize any individual payment. Only a valid capability does that.
+The sandbox has its own attested workload identity, established before the agent is exposed to any untrusted content. That identity authenticates the channel to the broker when the attestation handshake is enabled; it does not, by itself, authorize any individual payment. Only a valid capability does that. The handshake is implemented (`ATTESTATION_ENABLED`, see [`docs/PROTOCOL.md`](./docs/PROTOCOL.md) §5) but **off by default**, including in the demo configuration — with it off, the broker accepts the `session` value a caller supplies without verifying possession of the corresponding key. The nine invariant clauses below are unaffected either way.
 
 ### Network Boundary
 
@@ -135,7 +135,7 @@ Stated precisely: within the trust boundary described below, untrusted agent con
 
 ### Trust Boundary
 
-**Trusted:** the task definer (which states a closed resource set before untrusted content is read), the resource registry, the capability issuer, the broker, sandbox attestation, the payment facilitator (partially, see below), and the settlement network.
+**Trusted:** the task definer (which states a closed resource set before untrusted content is read), the resource registry, the capability issuer, the broker, sandbox attestation (implemented but off by default — see [`THREAT_MODEL.md`](./docs/THREAT_MODEL.md) "Sandbox attestation: what is actually enforced"), the payment facilitator (partially, see below), and the settlement network.
 
 **Adversarial:** arbitrary web content, tool outputs, documents, and the agent's own reasoning.
 

@@ -216,6 +216,44 @@ single-request case:
   because the check and the update happen together, in one transaction, at
   `RESERVED`.
 
+## Sandbox attestation handshake (optional, off by default)
+
+The sandbox attestation channel handshake (task 2.3,
+`apps/broker/src/routes/attest.ts`, `docs/PROTOCOL.md` §5) is **gated and
+off by default**, and — like the Chainlink CRE check below — is
+**defense-in-depth, not one of the 9 invariant clauses**:
+
+- **What it does when enabled** (`ATTESTATION_ENABLED=true`): the sandbox
+  proves live possession of the ephemeral Ed25519 key behind its `session`
+  value, via a single-use Broker-issued challenge. `/issue` and `/pay`
+  then reject any session without a live verified attestation, with
+  `401 attestation_required`. A handshake that is attempted and refused
+  returns `401 attestation_failed`.
+
+- **Fail-closed when enabled** — deliberately unlike the CRE check's
+  fail-open behaviour. CRE fails open because a third-party gateway can be
+  unreachable; attestation verification is a local check with no external
+  dependency, so failing open would make the flag meaningless.
+
+- **Off is the shipped default**, including for the demo. With
+  `ATTESTATION_ENABLED` unset or `false`, `/issue` and `/pay` behave
+  exactly as they do without any of this, and `/attest/*` returns
+  `404 attestation_not_enabled` so a sandbox can detect that no handshake
+  is required and proceed.
+
+- **The 9 clauses are untouched either way.** `Broker.authorize()` does
+  not consult attestation state. Clause 5
+  (`payment.session == capability.session`) remains plain field equality:
+  it ties a capability to the session it was issued for, and has never
+  claimed to prove who is presenting that session. Removing the
+  handshake entirely would not weaken any clause in
+  `SECURITY_INVARIANT.md`.
+
+- **Scope limit:** even enabled, this does not defend against a
+  compromised sandbox (`THREAT_MODEL.md` excludes that) — such a sandbox
+  can generate its own keypair and attest legitimately. It prevents a
+  third party presenting a `session` value it cannot prove possession of.
+
 ## Chainlink CRE optional policy check
 
 The Chainlink CRE confidential spend-policy check (task 5.2,
