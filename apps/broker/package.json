@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev:live": "node --env-file=.env.local --import tsx/esm src/index.ts",
+    "e2e:live": "node --env-file=.env.local --env-file=../sandbox/.env.local --import tsx/esm scripts/e2e-live-demo.ts",
     "lint": "eslint .",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
