@@ -4,6 +4,7 @@ import { db } from "../db.js";
 import { seedRegistry } from "../registry.js";
 import { issueCapability } from "../issuer.js";
 import { createTask } from "../budget.js";
+import { hashCanonical } from "../hash.js";
 import { reservePayment, submitPayment } from "../state-machine.js";
 import {
   settleAndRecord,
@@ -18,7 +19,7 @@ import type { HederaReconciliationResult } from "@paybound/settlement";
 // ---------------------------------------------------------------------------
 
 async function setUpSubmitted() {
-  const taskHash = randomUUID();
+  const taskHash = hashCanonical(randomUUID());
   const resourceId = randomUUID();
   seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price: "10.00" }]);
   createTask(taskHash, "100.00");

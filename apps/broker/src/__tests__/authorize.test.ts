@@ -6,12 +6,13 @@ import { seedRegistry } from "../registry.js";
 import { issueCapability, getCapabilityRecord } from "../issuer.js";
 import { createTask, getTask } from "../budget.js";
 import { authorize } from "../authorize.js";
+import { hashCanonical } from "../hash.js";
 
 function setUp(overrides: { price?: string; maxTotalSpend?: string; session?: string } = {}) {
   const price = overrides.price ?? "10.00";
   const session = overrides.session ?? "sandbox-public-key";
   const resourceId = randomUUID();
-  const taskHash = randomUUID();
+  const taskHash = hashCanonical(randomUUID());
 
   seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price }]);
   createTask(taskHash, overrides.maxTotalSpend ?? "100.00");

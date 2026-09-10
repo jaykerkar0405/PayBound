@@ -105,11 +105,11 @@ function createLegitimateSubmittedState(_capabilityId: CapabilityId): PublicSubm
   return {
     status: "SUBMITTED",
     capability: {
-      taskHash: "0x" + "a".repeat(64),
-      resourceId: "r-legit-service-entry",
+      taskHash: "a".repeat(64),
+      resourceId: "11111111-1111-4111-8111-111111111111",
       recipient: LEGITIMATE_RECIPIENT,
       exactAmount: LEGITIMATE_AMOUNT,
-      paymentRequestHash: "0x" + "b".repeat(64),
+      paymentRequestHash: "b".repeat(64),
       session: "302a300506032b6570032100" + "0".repeat(64),
       expiry: new Date(Date.now() + 300_000).toISOString(),
       maxUses: 1,
@@ -117,11 +117,11 @@ function createLegitimateSubmittedState(_capabilityId: CapabilityId): PublicSubm
     reservedFrom: {
       status: "RESERVED",
       capability: {
-        taskHash: "0x" + "a".repeat(64),
-        resourceId: "r-legit-service-entry",
+        taskHash: "a".repeat(64),
+        resourceId: "11111111-1111-4111-8111-111111111111",
         recipient: LEGITIMATE_RECIPIENT,
         exactAmount: LEGITIMATE_AMOUNT,
-        paymentRequestHash: "0x" + "b".repeat(64),
+        paymentRequestHash: "b".repeat(64),
         session: "302a300506032b6570032100" + "0".repeat(64),
         expiry: new Date(Date.now() + 300_000).toISOString(),
         maxUses: 1,
@@ -129,11 +129,11 @@ function createLegitimateSubmittedState(_capabilityId: CapabilityId): PublicSubm
       issuedFrom: {
         status: "ISSUED",
         capability: {
-          taskHash: "0x" + "a".repeat(64),
-          resourceId: "r-legit-service-entry",
+          taskHash: "a".repeat(64),
+          resourceId: "11111111-1111-4111-8111-111111111111",
           recipient: LEGITIMATE_RECIPIENT,
           exactAmount: LEGITIMATE_AMOUNT,
-          paymentRequestHash: "0x" + "b".repeat(64),
+          paymentRequestHash: "b".repeat(64),
           session: "302a300506032b6570032100" + "0".repeat(64),
           expiry: new Date(Date.now() + 300_000).toISOString(),
           maxUses: 1,
