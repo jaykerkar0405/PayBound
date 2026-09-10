@@ -19,19 +19,35 @@
  * (scripted-model.ts) — a deterministic, fixed read-then-pay sequence, no
  * API key or network call needed — since it's still the fastest/free way
  * to check the plumbing before spending real tokens. Set
- * `LIVE_RUN_MODEL=real` (with `GEMINI_API_KEY` set) to drive the SAME
- * agent loop, SAME tool definitions, and SAME system/user prompt with a
- * real model instead — Gemini (`@ai-sdk/google`) first, falling back to
- * Groq (`@ai-sdk/groq`) on any Gemini failure (network error, timeout,
- * non-OK response, or any other thrown error). This is the same
- * primary/fallback shape as the fiat402 project's
- * `apps/facilitator/src/policy/ai-advisory.ts` (`getAdvisoryRecommendation`)
- * — try the primary provider, log and fall through to the secondary on
- * any failure, log which provider actually served the request. No
- * Anthropic: no funded key was available for this project when 6.1b was
- * built, hence Gemini/Groq. See `runOnce()` below. Nothing else
- * in this file, agent.ts, or the tools changes between scripted and real
- * mode, or between which real provider ends up serving a given run.
+ * `LIVE_RUN_MODEL=real` (with at least `GEMINI_API_KEY_1` set) to drive
+ * the SAME agent loop, SAME tool definitions, and SAME system/user
+ * prompt with a real model instead:
+ *
+ *   1. Gemini key pool (this file's follow-up to PR #87): up to 3 keys
+ *      (`GEMINI_API_KEY_1`/`_2`/`_3`, config.ts), rotated with RPM/RPD
+ *      awareness by `gemini-key-pool.ts`. An RPM 429 (the key is fine,
+ *      just cooling down for its rolling ~60s window) moves to the next
+ *      key immediately; an RPD 429 (the key is genuinely done until
+ *      Google's daily reset) marks that key dead for the rest of this
+ *      process's run and moves on. Both are distinguished by the real
+ *      Gemini error body's `violations[].quotaId` — see
+ *      gemini-key-pool.ts's top doc comment for the two actual response
+ *      shapes this was built against.
+ *   2. Groq fallback (`@ai-sdk/groq`, PR #87, unmodified): only reached
+ *      once every configured Gemini key is unavailable right now (all
+ *      cooling down, all RPD-exhausted, or some mix) — same
+ *      primary/fallback shape as the fiat402 project's
+ *      `apps/facilitator/src/policy/ai-advisory.ts`
+ *      (`getAdvisoryRecommendation`): try the primary, log and fall
+ *      through to the secondary on failure, log which one actually
+ *      served the request.
+ *
+ * No Anthropic: no funded key was available for this project when 6.1b
+ * was built, hence Gemini/Groq. See `runOnce()` below. Nothing else in
+ * this file, agent.ts, or the tools changes between scripted and real
+ * mode, or between which key/provider ends up serving a given run — a
+ * caller with only `GEMINI_API_KEY` (PR #87/#88's original single-key
+ * var) set still works exactly as before, as a one-key pool (config.ts).
  *
  * Prerequisites (see apps/broker/scripts/seed-live-agent-run.ts):
  *   1. A Broker running and reachable at BROKER_HOST:BROKER_PORT
@@ -39,13 +55,14 @@
  *   2. That Broker's registry/budget seeded for LIVE_AGENT_RUN_RESOURCE_ID
  *      / LIVE_AGENT_RUN_TASK_DEFINITION:
  *        cd apps/broker && node --import tsx/esm scripts/seed-live-agent-run.ts
- *   3. For LIVE_RUN_MODEL=real: GEMINI_API_KEY set (see .env.example);
- *      GROQ_API_KEY too if you want the fallback to actually work rather
- *      than just fail loudly when Gemini fails.
+ *   3. For LIVE_RUN_MODEL=real: GEMINI_API_KEY_1 (or GEMINI_API_KEY) set
+ *      (see .env.example); GEMINI_API_KEY_2/_3 for extra rotation
+ *      capacity, GROQ_API_KEY for the fallback to actually work rather
+ *      than fail loudly once the whole Gemini pool is exhausted.
  *
  * Usage (from apps/sandbox/):
  *   pnpm dev:live                                  # scripted model (default, free)
- *   LIVE_RUN_MODEL=real pnpm dev:live               # real model (billed) — Gemini, falls back to Groq
+ *   LIVE_RUN_MODEL=real pnpm dev:live               # real model (billed) — Gemini pool, falls back to Groq
  *   (or: node --env-file=.env.local --import tsx/esm src/live-run.ts)
  */
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
@@ -56,6 +73,7 @@ import { getSandboxIdentity } from "./index.js";
 import { runSandboxLifecycle, type LanguageModelArg, type RunAgentLoopResult } from "./agent.js";
 import { performAttestationHandshake } from "./attest-handshake.js";
 import { createScriptedDecisionModel } from "./scripted-model.js";
+import { classifyGeminiQuotaError, createGeminiKeyPool, RPM_COOLDOWN_MS } from "./gemini-key-pool.js";
 
 /**
  * Must match `apps/broker/scripts/seed-live-agent-run.ts`'s
@@ -82,17 +100,41 @@ const CONTENT_URL = process.env.LIVE_RUN_CONTENT_URL ?? "https://example.com";
  * real billing. See this file's top doc comment.
  */
 const MODEL_MODE: "scripted" | "real" = process.env.LIVE_RUN_MODEL === "real" ? "real" : "scripted";
-/** Only consulted when MODEL_MODE === "real". Default matches fiat402's own choice. */
-const GEMINI_MODEL_ID = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
-/** Only consulted when MODEL_MODE === "real" and Gemini fails. Default matches fiat402's own choice. */
+/**
+ * Default per the RPM/RPD rate-limit research behind the Gemini key
+ * pool: the "flash-lite" tier is the only single Gemini tier clearing
+ * the required floor (15 RPM / 1,000 RPD / 250K TPM per key, per that
+ * research's own gemini-2.5-flash-lite figures — confirmed live as a
+ * SEPARATE per-model quota bucket from gemini-2.5-flash, whose quota
+ * was already exhausted from earlier testing while a fresh
+ * gemini-2.5-flash-lite call succeeded immediately).
+ *
+ * Actual default is "gemini-3.5-flash-lite", not "gemini-2.5-flash-lite"
+ * — also confirmed live, while testing multi-key rotation: a second,
+ * newer Google API key returned `404 NOT_FOUND` for
+ * "gemini-2.5-flash-lite" with the message "This model
+ * models/gemini-2.5-flash-lite is no longer available to new users...
+ * use models/gemini-3.5-flash-lite". `gemini-3.5-flash-lite` returned
+ * `200` on BOTH keys tested. Exact RPM/RPD figures for
+ * gemini-3.5-flash-lite aren't published in a static table (Google's own
+ * rate-limits doc points to the per-project aistudio.google.com/rate-limit
+ * page instead) — this default is chosen for actual availability across
+ * both old- and new-style API keys, not a re-confirmed RPM/RPD number.
+ */
+const GEMINI_MODEL_ID = process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite";
+/** Only consulted when MODEL_MODE === "real" and every Gemini key is exhausted. Default matches fiat402's own choice. */
 const GROQ_MODEL_ID = process.env.GROQ_MODEL ?? "openai/gpt-oss-120b";
 
 /**
  * Which provider actually served a given run. "scripted" never makes a
- * real API call; "gemini"/"groq" report which one produced the result
- * (relevant since Gemini can fail over to Groq mid-run).
+ * real API call; "gemini"/"groq" report which one produced the result.
+ * `geminiKeyIndex` (1-based, set only when provider === "gemini")
+ * reports which pool key handled it — never the key value itself.
  */
-type ProviderLabel = "scripted" | "gemini" | "groq";
+interface ProviderOutcome {
+  readonly provider: "scripted" | "gemini" | "groq";
+  readonly geminiKeyIndex?: number;
+}
 
 /**
  * Published per-token pricing, $ / 1M tokens (input, output). Used ONLY
@@ -104,28 +146,23 @@ type ProviderLabel = "scripted" | "gemini" | "groq";
  */
 const GEMINI_PRICING_PER_MTOK: Readonly<Record<string, { input: number; output: number }>> = {
   "gemini-2.5-flash": { input: 0.3, output: 2.5 },
+  "gemini-2.5-flash-lite": { input: 0.1, output: 0.4 },
+  "gemini-3.5-flash-lite": { input: 0.3, output: 2.5 },
 };
 const GROQ_PRICING_PER_MTOK: Readonly<Record<string, { input: number; output: number }>> = {
   "openai/gpt-oss-120b": { input: 0.15, output: 0.6 },
 };
 
 /**
- * Builds the real-model, Gemini-primary/Groq-fallback pair used by
- * `runOnce()` below. Neither needs `getCapabilityId` the way the
- * scripted model does: both read the real capabilityId directly out of
- * the prompt text `runAgentLoop` constructs (agent.ts's `userPrompt`),
- * exactly the way a real deployment would — see this file's doc comment
- * and the prior investigation into DEFAULT_SYSTEM_PROMPT/userPrompt
- * sufficiency.
+ * The Gemini key pool (task: RPM/RPD-aware rotation in front of PR #87's
+ * Gemini/Groq fallback). Built once per process from
+ * `config.geminiApiKeys` — see config.ts for how GEMINI_API_KEY_1/_2/_3
+ * (or the single GEMINI_API_KEY, for backward compat) populate it.
  */
-function buildGeminiModel(): LanguageModelArg {
-  if (!config.geminiApiKey) {
-    throw new Error(
-      "LIVE_RUN_MODEL=real requires GEMINI_API_KEY to be set (see .env.example). " +
-        'Unset LIVE_RUN_MODEL (or set it to "scripted") to run without a real model.',
-    );
-  }
-  const provider = createGoogleGenerativeAI({ apiKey: config.geminiApiKey });
+const geminiKeyPool = createGeminiKeyPool(config.geminiApiKeys);
+
+function buildGeminiModelForKey(apiKey: string): LanguageModelArg {
+  const provider = createGoogleGenerativeAI({ apiKey });
   return provider(GEMINI_MODEL_ID);
 }
 
@@ -140,27 +177,29 @@ function buildGroqModel(): LanguageModelArg {
 /** Prints token usage and, for a real run, an estimated cost for whichever provider actually served it. */
 function logCostAwareness(
   totalUsage: { inputTokens: number | undefined; outputTokens: number | undefined },
-  provider: ProviderLabel,
+  outcome: ProviderOutcome,
 ): void {
   const inputTokens = totalUsage.inputTokens ?? 0;
   const outputTokens = totalUsage.outputTokens ?? 0;
-  console.log(`\nToken usage (${provider}) — input: ${inputTokens}, output: ${outputTokens}`);
+  const label = outcome.provider === "gemini" ? `gemini #${outcome.geminiKeyIndex}` : outcome.provider;
+  console.log(`\nToken usage (${label}) — input: ${inputTokens}, output: ${outputTokens}`);
 
-  if (provider === "scripted") {
+  if (outcome.provider === "scripted") {
     console.log("Cost: $0.00 (scripted model — no real API call was made).");
     return;
   }
 
-  const modelId = provider === "gemini" ? GEMINI_MODEL_ID : GROQ_MODEL_ID;
-  const pricing = provider === "gemini" ? GEMINI_PRICING_PER_MTOK[modelId] : GROQ_PRICING_PER_MTOK[modelId];
+  const modelId = outcome.provider === "gemini" ? GEMINI_MODEL_ID : GROQ_MODEL_ID;
+  const pricing =
+    outcome.provider === "gemini" ? GEMINI_PRICING_PER_MTOK[modelId] : GROQ_PRICING_PER_MTOK[modelId];
   if (!pricing) {
-    console.log(`Cost: unknown — no published pricing on record for "${modelId}" (${provider}) in this script.`);
+    console.log(`Cost: unknown — no published pricing on record for "${modelId}" (${label}) in this script.`);
     return;
   }
 
   const estimatedCost = (inputTokens / 1_000_000) * pricing.input + (outputTokens / 1_000_000) * pricing.output;
   console.log(
-    `Estimated cost: ~$${estimatedCost.toFixed(6)} (${provider} "${modelId}", at published per-token rates; ` +
+    `Estimated cost: ~$${estimatedCost.toFixed(6)} (${label} "${modelId}", at published per-token rates; ` +
       "actual billing may differ, e.g. cached-token pricing not reflected here). " +
       "Rehearsing this run repeatedly for a demo adds up — use LIVE_RUN_MODEL=scripted for free dry runs.",
   );
@@ -229,8 +268,8 @@ async function assertBrokerReachable(brokerBase: string): Promise<void> {
  * Runs the full lifecycle once against `model`. `onCapabilityIssued` lets
  * the scripted model's `getCapabilityId` closure (main() below) observe
  * the real, Broker-issued capabilityId the moment it's known — a seam
- * only the scripted path needs (see buildGeminiModel's doc comment for
- * why the real providers don't).
+ * only the scripted path needs (the real providers read the capabilityId
+ * straight out of the prompt text, like a real deployment would).
  */
 async function runLifecycleWithModel(
   model: LanguageModelArg,
@@ -258,17 +297,28 @@ async function runLifecycleWithModel(
 /**
  * Runs one full lifecycle for MODEL_MODE:
  *  - "scripted": single attempt, createScriptedDecisionModel.
- *  - "real": Gemini first; on ANY failure (network error, timeout,
- *    non-OK response, or any other thrown error — same fiat402
- *    ai-advisory.ts shape), falls back to Groq for a second full
- *    attempt. A fallback re-runs attestation + issues a fresh
- *    capability (the Gemini attempt's capability, if unused, simply
- *    expires unused) — simpler and more honest than trying to resume
- *    mid-loop with a different model, and matches fiat402's own
- *    "retry the whole operation with the next provider" shape.
- * Returns the result together with which provider actually served it.
+ *  - "real": walks the Gemini key pool (gemini-key-pool.ts) — each
+ *    `nextAvailable()` key gets one full attempt; an RPM 429 reports
+ *    `reportRpmExhausted` (key cools down ~60s, tried again on a later
+ *    call once its window clears) and moves to the next key
+ *    immediately, no waiting; an RPD 429 reports `reportRpdExhausted`
+ *    (key is dead for the rest of this process's run) and moves on; any
+ *    other error is treated the same as PR #87's original "any failure"
+ *    Gemini handling — logged, and this key's attempt is abandoned in
+ *    favor of the next one, without changing that key's pool state
+ *    (it's not a quota problem, so it isn't marked cooling/exhausted).
+ *    Only once `nextAvailable()` returns undefined — every key
+ *    currently cooling down or exhausted — does this fall through to
+ *    Groq, preserving PR #87's fallback exactly. Each attempt (Gemini or
+ *    Groq) re-runs attestation + issues a fresh capability (an unused
+ *    capability from an abandoned attempt simply expires unused) —
+ *    simpler and more honest than trying to resume mid-loop with a
+ *    different model, and matches fiat402's own "retry the whole
+ *    operation with the next provider" shape.
+ * Returns the result together with which provider (and, for Gemini,
+ * which pool key) actually served it.
  */
-async function runOnce(brokerBase: string): Promise<{ result: RunAgentLoopResult; provider: ProviderLabel }> {
+async function runOnce(brokerBase: string): Promise<{ result: RunAgentLoopResult; outcome: ProviderOutcome }> {
   if (MODEL_MODE === "scripted") {
     let issuedCapabilityId: CapabilityId | undefined;
     console.log("Model: scripted-model.ts (deterministic, no API key, no cost)");
@@ -287,22 +337,45 @@ async function runOnce(brokerBase: string): Promise<{ result: RunAgentLoopResult
     const result = await runLifecycleWithModel(model, brokerBase, (id) => {
       issuedCapabilityId = id;
     });
-    return { result, provider: "scripted" };
+    return { result, outcome: { provider: "scripted" } };
   }
 
-  console.log(`Model: Gemini "${GEMINI_MODEL_ID}" (primary, real API calls — billed)`);
-  try {
-    const result = await runLifecycleWithModel(buildGeminiModel(), brokerBase);
-    return { result, provider: "gemini" };
-  } catch (err) {
-    console.error(
-      `[live-run] Gemini failed, falling back to Groq: ${err instanceof Error ? err.message : String(err)}`,
+  if (geminiKeyPool.size === 0) {
+    throw new Error(
+      "LIVE_RUN_MODEL=real requires at least GEMINI_API_KEY_1 (or GEMINI_API_KEY) to be set " +
+        '(see .env.example). Unset LIVE_RUN_MODEL (or set it to "scripted") to run without a real model.',
     );
   }
 
+  let entry;
+  while ((entry = geminiKeyPool.nextAvailable())) {
+    console.log(`Model: Gemini #${entry.index} "${GEMINI_MODEL_ID}" (real API calls — billed)`);
+    try {
+      const result = await runLifecycleWithModel(buildGeminiModelForKey(entry.key), brokerBase);
+      geminiKeyPool.reportSuccess(entry.index);
+      return { result, outcome: { provider: "gemini", geminiKeyIndex: entry.index } };
+    } catch (err) {
+      const quotaKind = classifyGeminiQuotaError(err);
+      const message = err instanceof Error ? err.message : String(err);
+
+      if (quotaKind === "rpm") {
+        geminiKeyPool.reportRpmExhausted(entry.index);
+        console.error(
+          `[live-run] Gemini key #${entry.index} is RPM-limited (cooling down ~${RPM_COOLDOWN_MS / 1000}s) — trying next key...`,
+        );
+      } else if (quotaKind === "rpd") {
+        geminiKeyPool.reportRpdExhausted(entry.index);
+        console.error(`[live-run] Gemini key #${entry.index} is RPD-exhausted for today — trying next key...`);
+      } else {
+        console.error(`[live-run] Gemini key #${entry.index} failed (non-quota error): ${message} — trying next key...`);
+      }
+    }
+  }
+
+  console.error("[live-run] Every configured Gemini key is currently unavailable — falling back to Groq.");
   console.log(`Model: Groq "${GROQ_MODEL_ID}" (fallback, real API calls — billed)`);
   const result = await runLifecycleWithModel(buildGroqModel(), brokerBase);
-  return { result, provider: "groq" };
+  return { result, outcome: { provider: "groq" } };
 }
 
 async function main(): Promise<void> {
@@ -317,9 +390,10 @@ async function main(): Promise<void> {
   const identity = getSandboxIdentity();
   console.log(`Workload identity (session): ${identity.publicKey.slice(0, 16)}...`);
 
-  const { result, provider } = await runOnce(brokerBase);
+  const { result, outcome } = await runOnce(brokerBase);
+  const servedBy = outcome.provider === "gemini" ? `gemini #${outcome.geminiKeyIndex}` : outcome.provider;
 
-  console.log(`\n--- Agent Loop Result (served by: ${provider}) ---`);
+  console.log(`\n--- Agent Loop Result (served by: ${servedBy}) ---`);
   console.log(`finishReason: ${result.finishReason}`);
   console.log(`steps: ${result.stepsCount}`);
   console.log(`toolCalls: ${JSON.stringify(result.toolCalls)}`);
@@ -327,7 +401,7 @@ async function main(): Promise<void> {
   console.log(`paid: ${result.paid}`);
   console.log(`payResults: ${JSON.stringify(result.payResults, null, 2)}`);
 
-  logCostAwareness(result.totalUsage, provider);
+  logCostAwareness(result.totalUsage, outcome);
 
   if (result.paid) {
     console.log(
