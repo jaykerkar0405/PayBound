@@ -15,6 +15,8 @@
 import { generateText, stepCountIs, type Tool } from "ai";
 import { type CapabilityId } from "@paybound/capability-spec";
 import { initializeAttestation } from "./index.js";
+import type { SandboxAttestation } from "./attestation.js";
+import type { HandshakeOutcome } from "./attest-handshake.js";
 import { payTool as defaultPayTool, type PayTool, type PayToolResult } from "./tools/pay.js";
 import {
   readContentTool as defaultReadContentTool,
@@ -59,6 +61,27 @@ export interface SandboxLifecycleOptions {
   readonly prompt?: string | undefined;
   /** System prompt override. */
   readonly systemPrompt?: string | undefined;
+  /**
+   * Attestation channel handshake (task 2.3, docs/PROTOCOL.md §5),
+   * performed at Step 1.5 — after the workload identity exists, before a
+   * capability is requested, and therefore before any untrusted content
+   * is read.
+   *
+   * Injectable for the same reason `issueCapability`/`readContentTool`/
+   * `payTool` are: without a seam here, every test would need either real
+   * network access or a silently-skipped step that hides whether this is
+   * wired at all. Omit it and no handshake is attempted — the Broker is
+   * still the sole authority on whether the resulting requests are
+   * allowed (it rejects unattested sessions itself when
+   * ATTESTATION_ENABLED=true).
+   *
+   * Never throws on a Broker that doesn't require attestation: see
+   * `performAttestationHandshake` (attest-handshake.ts) for the
+   * fail-open-on-404 behaviour.
+   */
+  readonly performHandshake?:
+    | ((attestation: SandboxAttestation) => Promise<HandshakeOutcome> | HandshakeOutcome)
+    | undefined;
   /**
    * Trusted capability acquisition function.
    * Called with the attested session public key BEFORE the agent loop starts.
@@ -186,8 +209,15 @@ export async function runAgentLoop(options: RunAgentLoopOptions): Promise<RunAge
 /**
  * Coordinates the full trusted sandbox lifecycle with strictly enforced ordering:
  * 1. Attestation: initialize attested workload identity.
+ * 1.5. Channel handshake: prove live possession of that identity to the
+ *      Broker (task 2.3, docs/PROTOCOL.md §5). Optional and injectable —
+ *      see `performHandshake` on SandboxLifecycleOptions.
  * 2. Trusted Capability Issuance: acquire capability before any untrusted content is read.
  * 3. Agent Loop: hand control to the agent loop with pre-issued capabilityId.
+ *
+ * The ordering matters: the identity exists before it is proven, it is
+ * proven before a capability is requested against it, and all of that
+ * happens before Step 3 reads a single byte of untrusted content.
  *
  * Fails loudly if neither `capabilityId` nor `issueCapability` is provided,
  * rather than fabricating a fake, never-issued capabilityId (audit finding
@@ -203,6 +233,23 @@ export async function runSandboxLifecycle(
 ): Promise<RunAgentLoopResult> {
   // Step 1: Establish attested workload identity BEFORE any untrusted content is read
   const identity = initializeAttestation();
+
+  // Step 1.5: Prove live possession of that identity to the Broker
+  // (task 2.3, docs/PROTOCOL.md §5). Only attempted when a handshake
+  // implementation is supplied; `performAttestationHandshake`
+  // (attest-handshake.ts) never throws, and reports `not_required` for a
+  // Broker that isn't running with ATTESTATION_ENABLED=true, so a
+  // gated-off Broker does not block the run.
+  if (options.performHandshake) {
+    const outcome = await options.performHandshake(identity);
+    if (outcome.status === "rejected") {
+      console.error(
+        `[AUDIT] attestation handshake rejected by Broker: ${outcome.detail}. ` +
+          "Continuing — the Broker is the sole authority and will reject " +
+          "/issue and /pay for this session itself if it requires attestation.",
+      );
+    }
+  }
 
   // Step 2: Obtain capability from trusted source BEFORE untrusted content is touched
   let capabilityId = options.capabilityId;

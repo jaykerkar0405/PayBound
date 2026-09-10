@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
-import {
-  generateSandboxAttestation,
-  verifyAttestationProof,
-  type SandboxAttestation,
-} from "../attestation.js";
+import { generateSandboxAttestation, type SandboxAttestation } from "../attestation.js";
+// The verifier lives in @paybound/protocol (one implementation, shared with
+// the Broker). It is imported here rather than through ../attestation.js
+// because that file cannot import workspace packages — see the
+// "DELIBERATELY DUPLICATED" note there. Test files are not compiled by the
+// sandbox Dockerfile, so they can import it directly.
+import { verifyAttestationProof } from "@paybound/protocol";
 import { initializeAttestation, getSandboxIdentity } from "../index.js";
 
 describe("Sandbox Attested Workload Identity (Task 2.3)", () => {
