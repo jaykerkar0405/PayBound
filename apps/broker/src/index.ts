@@ -6,6 +6,7 @@ import { config } from "./config.js";
 import "./db.js";
 import { payRoute } from "./routes/pay.js";
 import { issueRoute } from "./routes/issue.js";
+import { attestRoute } from "./routes/attest.js";
 import { sweepRecoverablePayments } from "./settlement.js";
 
 const app = new Hono();
@@ -25,6 +26,7 @@ app.get("/health", zValidator("query", healthQuerySchema), (c) => {
 
 app.route("/pay", payRoute);
 app.route("/issue", issueRoute);
+app.route("/attest", attestRoute);
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`broker listening on http://localhost:${info.port}`);

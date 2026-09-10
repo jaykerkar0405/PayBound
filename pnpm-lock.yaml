@@ -44,6 +44,9 @@ importers:
       '@paybound/ledger-signer':
         specifier: workspace:*
         version: link:../../packages/ledger-signer
+      '@paybound/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@paybound/settlement':
         specifier: workspace:*
         version: link:../../packages/settlement
