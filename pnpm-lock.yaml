@@ -102,6 +102,9 @@ importers:
       '@ai-sdk/groq':
         specifier: 4.0.40
         version: 4.0.40(zod@4.5.4)
+      '@ai-sdk/provider':
+        specifier: 4.0.13
+        version: 4.0.13
       '@paybound/capability-spec':
         specifier: workspace:*
         version: link:../../packages/capability-spec
