@@ -83,14 +83,8 @@ export interface HederaReconciliationResult {
  * returned/threw an "unknown" outcome) by re-querying that same
  * transaction's receipt directly from the network, by ID — the correct
  * recovery path per CAPABILITY_SPEC.md, not a blind retry (which would
- * risk double-submission).
- * Reconciles a RECOVERABLE payment by re-querying the transaction receipt,
- * using a two-stage fallback:
+ * risk double-submission). Uses a two-stage fallback:
  *
- * Throws if the network still can't produce a definitive answer (e.g. the
- * receipt hasn't propagated yet, or another timeout) — callers should
- * treat a throw here as "still unknown," not as a failure, and leave the
- * payment RECOVERABLE for a later attempt.
  * Stage 1 — consensus-node `TransactionReceiptQuery` (fast, same-session):
  *   Works reliably within ~3 minutes of consensus. After that, the receipt
  *   expires from the node's cache and the query throws `RECEIPT_NOT_FOUND`
@@ -110,12 +104,6 @@ export interface HederaReconciliationResult {
 export async function queryHederaTransactionReceipt(
   transactionId: string,
 ): Promise<HederaReconciliationResult> {
-  const client = getHederaClient();
-  const receipt = await new TransactionReceiptQuery()
-    .setTransactionId(TransactionId.fromString(transactionId))
-    .setValidateStatus(false)
-    .execute(client);
-  const status = receipt.status.toString();
   // Stage 1: consensus node (fast path, short receipt window)
   try {
     const client = getHederaClient();
