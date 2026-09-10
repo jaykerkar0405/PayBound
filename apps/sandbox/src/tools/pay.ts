@@ -22,7 +22,7 @@ import {
   type PublicPaymentState,
   type AuthorizationFailureReason,
 } from "@paybound/capability-spec";
-import { config } from "../config.js";
+import { config, brokerBaseUrl } from "../config.js";
 
 /**
  * Result shape returned by the payment tool execution.
@@ -95,12 +95,7 @@ export async function executePay(
 ): Promise<PayToolResult> {
   const fetchImpl = options.fetch ?? fetch;
 
-  const defaultBase =
-    config.brokerHost.startsWith("http://") || config.brokerHost.startsWith("https://")
-      ? `${config.brokerHost}:${config.brokerPort}`
-      : `http://${config.brokerHost}:${config.brokerPort}`;
-
-  const targetUrl = options.brokerUrl ?? `${defaultBase}/pay`;
+  const targetUrl = options.brokerUrl ?? `${brokerBaseUrl(config)}/pay`;
 
   let response: Response;
   try {
