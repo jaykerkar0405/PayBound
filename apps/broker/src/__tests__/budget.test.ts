@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { createTask, getTask, tryReserveBudget } from "../budget.js";
+import { createTask, getTask, tryReserveBudget, increaseTaskBudget } from "../budget.js";
 import { hashCanonical } from "../hash.js";
 
 describe("budget", () => {
@@ -85,5 +85,50 @@ describe("budget", () => {
 
     // Confirms the budget is now exhausted, not left with floating-point slack.
     expect(tryReserveBudget(taskHash, "0.01")).toBe(false);
+  });
+
+  describe("increaseTaskBudget", () => {
+    it("raises maxTotalSpend, leaving spentSoFar untouched", () => {
+      const taskHash = hashCanonical(randomUUID());
+      createTask(taskHash, "10.00");
+      tryReserveBudget(taskHash, "5.00");
+
+      increaseTaskBudget(taskHash, "1000.00");
+
+      expect(getTask(taskHash)).toEqual({
+        taskHash,
+        maxTotalSpend: "1000.00",
+        spentSoFar: "5.00",
+      });
+    });
+
+    it("is a no-op when the given value is not strictly greater than the current maxTotalSpend", () => {
+      const taskHash = hashCanonical(randomUUID());
+      createTask(taskHash, "100.00");
+
+      increaseTaskBudget(taskHash, "100.00");
+      expect(getTask(taskHash)?.maxTotalSpend).toBe("100.00");
+
+      increaseTaskBudget(taskHash, "50.00");
+      expect(getTask(taskHash)?.maxTotalSpend).toBe("100.00");
+    });
+
+    it("lets a reservation that previously would have exceeded budget succeed after raising it", () => {
+      const taskHash = hashCanonical(randomUUID());
+      createTask(taskHash, "10.00");
+      tryReserveBudget(taskHash, "10.00");
+
+      expect(tryReserveBudget(taskHash, "5.00")).toBe(false);
+
+      increaseTaskBudget(taskHash, "20.00");
+
+      expect(tryReserveBudget(taskHash, "5.00")).toBe(true);
+      expect(getTask(taskHash)?.spentSoFar).toBe("15.00");
+    });
+
+    it("throws for a taskHash with no existing task", () => {
+      const taskHash = hashCanonical(randomUUID());
+      expect(() => increaseTaskBudget(taskHash, "100.00")).toThrow();
+    });
   });
 });

@@ -67,6 +67,10 @@ const updateSpentSoFarStatement = db.prepare<[string, string]>(
   "UPDATE tasks SET spent_so_far = ? WHERE task_hash = ?",
 );
 
+const updateMaxTotalSpendStatement = db.prepare<[string, string]>(
+  "UPDATE tasks SET max_total_spend = ? WHERE task_hash = ?",
+);
+
 /**
  * Creates a new Task budget record with spentSoFar initialized to "0".
  * taskHash is the table's primary key, so creating a task whose taskHash
@@ -152,4 +156,31 @@ const reserveBudgetTransaction = db.transaction(
 
 export function tryReserveBudget(taskHash: Task["taskHash"], amount: Task["maxTotalSpend"]): boolean {
   return reserveBudgetTransaction(taskHash, amount);
+}
+
+/**
+ * Raises an existing task's maxTotalSpend to `newMaxTotalSpend` — never
+ * lowers it; a no-op if `newMaxTotalSpend` is not strictly greater than
+ * the task's current maxTotalSpend. Never touches spentSoFar.
+ *
+ * Exists for dev/verification scripts that reuse one fixed, idempotently-
+ * seeded task across many live runs (e.g.
+ * apps/broker/scripts/seed-live-agent-run.ts, whose `createTask()` call
+ * only runs once — re-running the seed script afterward is a no-op per
+ * its own idempotency guarantee, so a task's budget would otherwise stay
+ * frozen at whatever it was first seeded with). Not used by any
+ * request-handling code path — `POST /issue` never changes an existing
+ * task's budget once created.
+ *
+ * Throws if no task with `taskHash` exists.
+ */
+export function increaseTaskBudget(taskHash: Task["taskHash"], newMaxTotalSpend: Task["maxTotalSpend"]): void {
+  const row = selectByTaskHashStatement.get(taskHash);
+  if (row === undefined) {
+    throw new Error(`increaseTaskBudget: no task with taskHash "${taskHash}"`);
+  }
+  if (compareDecimalStrings(newMaxTotalSpend, row.max_total_spend) <= 0) {
+    return;
+  }
+  updateMaxTotalSpendStatement.run(newMaxTotalSpend, taskHash);
 }
