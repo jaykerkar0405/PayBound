@@ -13,8 +13,21 @@ at startup before any untrusted content is read (per `THREAT_MODEL.md`). The
 public key (SPKI DER hex) serves as `session: PublicKey` in `packages/types`.
 Freshness/non-replay is enforced via challenge-response: the sandbox signs a
 single-use Broker challenge with the in-memory private key. The private key is
-never persisted to disk or logged. `docs/PROTOCOL.md` §5 and
-`apps/sandbox/src/attestation.ts` implement this mechanism.
+never persisted to disk or logged.
+
+**Implementation status (be precise here — an earlier version of this entry
+said only "implement this mechanism," which read as if the end-to-end
+handshake were live when only the sandbox-side crypto primitives existed):**
+the full handshake is now implemented on both sides —
+`apps/sandbox/src/attestation.ts` (signing) and
+`apps/sandbox/src/attest-handshake.ts` (the caller),
+`packages/protocol/src/attestation.ts` (the shared verifier), and
+`apps/broker/src/attestation.ts` + `apps/broker/src/routes/attest.ts`
+(`POST /attest/challenge`, `POST /attest/verify`, and the `/issue`//`pay`
+checks). It is **gated off by default** via `ATTESTATION_ENABLED`, and off
+is the as-shipped and as-demoed configuration. See `docs/PROTOCOL.md` §5,
+`docs/ATTESTATION_HANDSHAKE_DESIGN.md`, and `THREAT_MODEL.md`'s "Sandbox
+attestation: what is actually enforced".
 
 ## Resolved: AuthorizationFailureReason names now match SECURITY_INVARIANT.md's resolved clause names
 

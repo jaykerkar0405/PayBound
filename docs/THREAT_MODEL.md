@@ -16,10 +16,13 @@ the authoritative statement of that boundary.
   objects from trusted task state.
 - **Broker** — the sole authority behind `Broker.authorize(payment)`; the
   only component that constructs and signs a real payment.
-- **Sandbox attestation** — the sandbox's attested workload identity,
-  established before the agent is exposed to any untrusted content. It
-  authenticates the channel to the Broker; it does not by itself authorize
-  any individual payment.
+- **Sandbox attestation** — **optional, off by default** (see "Sandbox
+  attestation: what is actually enforced" below). When
+  `ATTESTATION_ENABLED=true`, it authenticates the channel to the Broker
+  via challenge-response before any individual payment is authorized. In
+  the as-shipped and as-demoed default state, this control is not active
+  — treat this entry as aspirational, not enforced, unless that flag is
+  set.
 - **Payment facilitator** (partially — see "explicitly out of scope" below).
 - **Settlement network**.
 
@@ -35,6 +38,42 @@ of these can carry an instruction, directly or through a manipulated
 context, that the agent will act on — whether from a deliberate prompt
 injection, a hallucination, or ordinary flawed reasoning. The guarantee does
 not depend on distinguishing these causes from one another.
+
+## Sandbox attestation: what is actually enforced
+
+The "Sandbox attestation" entry in the Trusted list above is conditional,
+and this section states the condition plainly rather than leaving a reader
+to infer it.
+
+The channel handshake is **implemented** (task 2.3): the sandbox proves
+live possession of its ephemeral Ed25519 identity to the Broker via
+challenge-response, and the Broker rejects `/issue` and `/pay` for a
+session that has not done so. See `PROTOCOL.md` §5.
+
+It is **gated off by default** (`ATTESTATION_ENABLED`, unset or `false`),
+and **off is the as-shipped and as-demoed configuration**. In that
+default state:
+
+- The Broker accepts the `session` value a caller supplies without
+  requiring any proof that the caller holds the corresponding private
+  key. Nothing about a `session` value is cryptographically verified.
+- Consequently, the trust placed in "Sandbox attestation" above is, by
+  default, **assumed rather than enforced**. Treat it as a documented
+  limitation, not an active control, unless the deployment sets
+  `ATTESTATION_ENABLED=true`.
+
+What this does **not** change, in either state: the 9 invariant clauses in
+[`SECURITY_INVARIANT.md`](./SECURITY_INVARIANT.md), which are what
+`Broker.authorize(payment)` enforces and which are unaffected by
+attestation being on or off. Clause 5 (`payment.session ==
+capability.session`) is plain field equality in both cases; it ties a
+capability to the session it was issued for, and never claimed to prove
+who is presenting that session.
+
+Even fully enabled, attestation does not defend against a **compromised
+sandbox** (excluded below): such a sandbox can generate its own keypair
+and attest with it legitimately. What it prevents is a third party
+presenting a `session` value it cannot prove live possession of.
 
 ## Explicitly out of scope
 

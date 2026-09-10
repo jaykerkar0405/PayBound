@@ -475,3 +475,119 @@ const createValidPublicSubmittedState = (): PublicSubmittedPaymentState => ({
     }
   });
 });
+
+/**
+ * Step 1.5 — the attestation channel handshake (task 2.3,
+ * docs/PROTOCOL.md §5, docs/ATTESTATION_HANDSHAKE_DESIGN.md §5).
+ *
+ * The handshake is injected via `performHandshake`, the same seam pattern
+ * as `issueCapability`/`readContentTool`/`payTool`, so these exercise the
+ * real ordering and the real fail-open behaviour without needing network
+ * access or a running Broker.
+ */
+describe("Attestation channel handshake — Step 1.5 (Task 2.3)", () => {
+  it("performs the handshake after the identity exists and before a capability is requested", async () => {
+    const sequence: string[] = [];
+    const fixedCapabilityId = capabilityIdSchema.parse(randomUUID());
+    let handshakePublicKey: string | undefined;
+
+    const readTool = createReadContentTool({
+      onRead: () => sequence.push("untrusted_content_read"),
+      fetch: async () => new Response("Benign content"),
+    });
+
+    const model = createMockModel([
+      { toolCalls: [{ toolName: "readContent", input: { url: "https://news.example.com/a" } }] },
+      { text: "Done." },
+    ]);
+
+    const result = await runSandboxLifecycle({
+      model,
+      performHandshake: async (attestation) => {
+        sequence.push("handshake");
+        handshakePublicKey = attestation.publicKey;
+        return { status: "attested", expiresAt: new Date(Date.now() + 60_000).toISOString() };
+      },
+      issueCapability: async (session) => {
+        sequence.push("issue_capability");
+        // The session handed to issuance is the same identity that was
+        // just proven — that binding is the whole point of the handshake.
+        expect(session).toBe(handshakePublicKey);
+        return fixedCapabilityId;
+      },
+      readContentTool: readTool,
+      contentUrl: "https://news.example.com/a",
+    });
+
+    expect(sequence).toEqual(["handshake", "issue_capability", "untrusted_content_read"]);
+    expect(handshakePublicKey).toMatch(/^[0-9a-fA-F]{88}$/);
+    expect(result.readResults).toHaveLength(1);
+  });
+
+  it("proceeds normally when the Broker reports it does not require attestation (fail-open on 404)", async () => {
+    const fixedCapabilityId = capabilityIdSchema.parse(randomUUID());
+    let issued = false;
+
+    const model = createMockModel([{ text: "Nothing to do." }]);
+
+    const result = await runSandboxLifecycle({
+      model,
+      performHandshake: async () => ({
+        status: "not_required",
+        detail: "Broker returned 404 from /attest/challenge (ATTESTATION_ENABLED is not true)",
+      }),
+      issueCapability: () => {
+        issued = true;
+        return fixedCapabilityId;
+      },
+      readContentTool: createReadContentTool({ fetch: async () => new Response("x") }),
+      contentText: "x",
+    });
+
+    // The run is not blocked: issuance still happened and the loop completed.
+    expect(issued).toBe(true);
+    expect(result.finishReason).toBe("stop");
+  });
+
+  it("does not abort the run when the Broker rejects the proof — the Broker itself remains the authority", async () => {
+    const fixedCapabilityId = capabilityIdSchema.parse(randomUUID());
+    let issued = false;
+
+    const model = createMockModel([{ text: "Nothing to do." }]);
+
+    const result = await runSandboxLifecycle({
+      model,
+      performHandshake: async () => ({ status: "rejected", detail: "signature did not verify" }),
+      issueCapability: () => {
+        issued = true;
+        return fixedCapabilityId;
+      },
+      readContentTool: createReadContentTool({ fetch: async () => new Response("x") }),
+      contentText: "x",
+    });
+
+    // The sandbox does not pre-empt the Broker's decision by throwing: a
+    // Broker that requires attestation rejects /issue and /pay itself.
+    expect(issued).toBe(true);
+    expect(result.finishReason).toBe("stop");
+  });
+
+  it("skips the handshake entirely when no implementation is supplied (existing callers unaffected)", async () => {
+    const fixedCapabilityId = capabilityIdSchema.parse(randomUUID());
+    let issued = false;
+
+    const model = createMockModel([{ text: "Nothing to do." }]);
+
+    await runSandboxLifecycle({
+      model,
+      issueCapability: () => {
+        issued = true;
+        return fixedCapabilityId;
+      },
+      readContentTool: createReadContentTool({ fetch: async () => new Response("x") }),
+      contentText: "x",
+    });
+
+    expect(issued).toBe(true);
+  });
+});

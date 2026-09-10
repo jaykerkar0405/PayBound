@@ -44,6 +44,9 @@ importers:
       '@paybound/ledger-signer':
         specifier: workspace:*
         version: link:../../packages/ledger-signer
+      '@paybound/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@paybound/settlement':
         specifier: workspace:*
         version: link:../../packages/settlement
@@ -96,6 +99,9 @@ importers:
       '@paybound/capability-spec':
         specifier: workspace:*
         version: link:../../packages/capability-spec
+      '@paybound/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       ai:
         specifier: 7.0.92
         version: 7.0.92(zod@4.5.4)
@@ -132,7 +138,11 @@ importers:
         specifier: ^26.4.1
         version: 26.4.1
 
-  packages/protocol: {}
+  packages/protocol:
+    devDependencies:
+      '@types/node':
+        specifier: ^26.4.1
+        version: 26.4.1
 
   packages/settlement:
     dependencies:

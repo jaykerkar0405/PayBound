@@ -65,6 +65,38 @@ export interface Config {
    * when `creEnabled` is true. `undefined` when not configured.
    */
   readonly creGatewayUrl: string | undefined;
+  /**
+   * Gates the sandbox attestation channel handshake (task 2.3,
+   * docs/PROTOCOL.md §5). Defaults **off** — `/issue` and `/pay` behave
+   * exactly as they do today when false, and `/attest/*` returns 404 so
+   * a sandbox can detect that this Broker doesn't require a handshake.
+   *
+   * When true the check is fail-**closed**: an unattested session is
+   * rejected. That differs deliberately from `creEnabled`'s fail-open
+   * design — CRE fails open because a third-party gateway can be
+   * unreachable, whereas attestation verification is a local check with
+   * no external dependency, so fail-open would make this flag a no-op.
+   *
+   * Attestation is defense-in-depth on top of the 9 invariant clauses,
+   * never a replacement for them: disabling it does not weaken anything
+   * `Broker.authorize()` enforces. See
+   * docs/ATTESTATION_HANDSHAKE_DESIGN.md §4 and
+   * docs/CAPABILITY_SPEC.md §"Sandbox attestation handshake".
+   */
+  readonly attestationEnabled: boolean;
+  /**
+   * How long a verified attestation authenticates a session before it
+   * must re-attest. Default 30 minutes — long enough for one full agent
+   * run, short enough to stay consistent with PROTOCOL.md §5's freshness
+   * framing.
+   */
+  readonly attestationTtlMs: number;
+  /**
+   * How long an issued, not-yet-used challenge stays valid. Default 60
+   * seconds — signing and responding is effectively instantaneous, so a
+   * leaked challenge stops being useful quickly.
+   */
+  readonly attestationChallengeTtlMs: number;
 }
 
 function parseLedgerTransport(value: string | undefined): LedgerTransportKind {
@@ -89,4 +121,7 @@ export const config: Config = {
   hederaHcsTopicId: process.env.HEDERA_HCS_TOPIC_ID,
   creEnabled: process.env.CRE_ENABLED === "true",
   creGatewayUrl: process.env.CRE_GATEWAY_URL,
+  attestationEnabled: process.env.ATTESTATION_ENABLED === "true",
+  attestationTtlMs: Number(process.env.ATTESTATION_TTL_MS ?? 30 * 60 * 1000),
+  attestationChallengeTtlMs: Number(process.env.ATTESTATION_CHALLENGE_TTL_MS ?? 60 * 1000),
 };
