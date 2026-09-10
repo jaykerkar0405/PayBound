@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:live": "node --env-file=.env.local --import tsx/esm src/live-run.ts",
     "lint": "eslint .",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
