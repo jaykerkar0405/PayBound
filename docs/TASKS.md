@@ -102,6 +102,16 @@ needs the broker's `pay()` endpoint (1.7).
 - [x] **2.3** Establish the sandbox's attested workload identity, created before
       the agent is exposed to any untrusted content, and wire it into the
       channel handshake defined in 0.4. Depends on 2.2, 0.4. *(Sandbox)*
+      → Identity: `apps/sandbox/src/attestation.ts`. Handshake (originally
+      unbuilt — the identity existed but nothing in the Broker ever issued a
+      challenge or verified a proof): `POST /attest/challenge` +
+      `POST /attest/verify` (`apps/broker/src/routes/attest.ts`), shared
+      verifier in `packages/protocol`, sandbox caller in
+      `apps/sandbox/src/attest-handshake.ts`, lifecycle Step 1.5 in
+      `agent.ts`. **Gated off by default** (`ATTESTATION_ENABLED`); off is
+      the as-shipped and as-demoed configuration, and the 9 invariant
+      clauses are unaffected either way. See
+      `docs/ATTESTATION_HANDSHAKE_DESIGN.md` and `PROTOCOL.md` §5.
 - [x] **2.4** Implement the agent's payment tool: exactly one parameter
       (`capability_id`), no destination/amount fields, calling the broker's
       `pay()` endpoint from 1.7. Depends on 2.3, 1.7. *(Sandbox)*
