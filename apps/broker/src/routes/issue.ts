@@ -6,6 +6,7 @@ import { checkSpendPolicy } from "../cre-policy.js";
 import { createTask, getTask, getTaskResourceId } from "../budget.js";
 import { getResourceById } from "../registry.js";
 import { hashCanonical } from "../hash.js";
+import { isAttestationEnabled, isAttested } from "../attestation.js";
 
 /**
  * POST /issue — HTTP endpoint for capability issuance.
@@ -73,6 +74,25 @@ issueRoute.post(
   async (c) => {
     const { taskDefinition, resourceId, exactAmount, paymentRequest, session } =
       c.req.valid("json");
+
+    // Sandbox attestation channel check (task 2.3, docs/PROTOCOL.md §5).
+    // Gated off by default; when ATTESTATION_ENABLED=true it is
+    // fail-closed — an unattested session cannot be issued a capability.
+    // This authenticates the *channel*, and is deliberately not one of
+    // the 9 invariant clauses: it runs before issuance is attempted at
+    // all and never touches Broker.authorize(). See
+    // docs/ATTESTATION_HANDSHAKE_DESIGN.md §§3-4.
+    if (isAttestationEnabled() && !isAttested(session)) {
+      return c.json(
+        {
+          error: "attestation_required",
+          message:
+            `No live attestation for session "${session}". Complete the channel handshake ` +
+            "(POST /attest/challenge, then POST /attest/verify) before issuing a capability.",
+        },
+        401,
+      );
+    }
 
     // Optional Chainlink CRE confidential spend-policy check (task 5.2).
     // Non-load-bearing: if disabled, misconfigured, or unreachable,
