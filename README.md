@@ -162,6 +162,8 @@ Removing any supporting service does not weaken the core guarantee. The capabili
 
 Prerequisites: Node `>=24`, `pnpm@11.3.0` (see `package.json#packageManager`), and Docker (used by the sandbox's own container and by Speculos, below).
 
+For a real, hand-verifiable run of the full payment path — real agent, real Broker, real Hedera settlement, real HCS audit log — see [`docs/WALKTHROUGH.md`](./docs/WALKTHROUGH.md) instead of the summary below.
+
 ```bash
 pnpm install
 pnpm build
@@ -216,7 +218,7 @@ PayBound is in early development. The specification (capability object, state ma
 - [ ] Reference broker implementation
 - [ ] Sandbox network isolation layer
 - [ ] Reference agent integration
-- [ ] End-to-end example and walkthrough
+- [x] [End-to-end example and walkthrough](./docs/WALKTHROUGH.md)
 
 ## Contributing
 
