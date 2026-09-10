@@ -12,7 +12,7 @@
  *    network egress policy).
  */
 
-import { generateText, stepCountIs, type Tool } from "ai";
+import { generateText, stepCountIs, type LanguageModelUsage, type Tool } from "ai";
 import { type CapabilityId } from "@paybound/capability-spec";
 import { initializeAttestation } from "./index.js";
 import type { SandboxAttestation } from "./attestation.js";
@@ -117,6 +117,15 @@ export interface RunAgentLoopResult {
   readonly paid: boolean;
   readonly payResults: PayToolResult[];
   readonly readResults: ReadContentResult[];
+  /**
+   * Aggregated token usage across every step of this run, as reported by
+   * `generateText`'s `totalUsage`. For `MockLanguageModelV3` callers (all
+   * existing tests, `scripted-model.ts`) this is the mock's stub usage
+   * figures, not real billing data. For a real provider (task 6.1b,
+   * `live-run.ts`'s Anthropic-backed model) this reflects actual token
+   * consumption, used for cost-aware logging.
+   */
+  readonly totalUsage: LanguageModelUsage;
 }
 
 const DEFAULT_SYSTEM_PROMPT = `
@@ -203,6 +212,7 @@ export async function runAgentLoop(options: RunAgentLoopOptions): Promise<RunAge
     paid,
     payResults,
     readResults,
+    totalUsage: generateResult.totalUsage,
   };
 }
 
