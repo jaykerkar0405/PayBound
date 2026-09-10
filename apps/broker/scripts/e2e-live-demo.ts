@@ -53,9 +53,10 @@
  *     HEDERA_HCS_TOPIC_ID set (apps/broker/.env.local) — this script
  *     will not proceed without them; there is nothing to settle or
  *     verify otherwise.
- *   - GEMINI_API_KEY (apps/sandbox/.env.local) — this script's whole
- *     point is the real-model path; use `pnpm --filter sandbox dev:live`
- *     directly if you only want the free scripted-model plumbing check.
+ *   - At least GEMINI_API_KEY_1 (or the legacy GEMINI_API_KEY),
+ *     apps/sandbox/.env.local — this script's whole point is the
+ *     real-model path; use `pnpm --filter sandbox dev:live` directly if
+ *     you only want the free scripted-model plumbing check.
  */
 import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
@@ -194,14 +195,25 @@ async function preflight(brokerUrl: string): Promise<void> {
   }
   console.log(`  HCS audit topic configured: ${process.env.HEDERA_HCS_TOPIC_ID}.`);
 
-  if (process.env.GEMINI_API_KEY === undefined) {
+  const geminiKeyCount = [
+    process.env.GEMINI_API_KEY_1,
+    process.env.GEMINI_API_KEY_2,
+    process.env.GEMINI_API_KEY_3,
+  ].filter((key) => key !== undefined && key !== "").length || (process.env.GEMINI_API_KEY ? 1 : 0);
+
+  if (geminiKeyCount === 0) {
     throw new Error(
-      "GEMINI_API_KEY is not set (apps/sandbox/.env.local) — this script drives the real-model " +
-        "path (LIVE_RUN_MODEL=real). Use `pnpm --filter sandbox dev:live` directly (scripted " +
+      "No Gemini API key is set (apps/sandbox/.env.local) — this script drives the real-model " +
+        "path (LIVE_RUN_MODEL=real). Set at least GEMINI_API_KEY_1 (or the legacy GEMINI_API_KEY) " +
+        "— see apps/sandbox/.env.example. Use `pnpm --filter sandbox dev:live` directly (scripted " +
         "model, no key needed) if that's all you want to check.",
     );
   }
-  console.log("  GEMINI_API_KEY present (GROQ_API_KEY fallback " + (process.env.GROQ_API_KEY ? "present" : "NOT set — Gemini failures would not have a fallback") + ").");
+  console.log(
+    `  Gemini key pool: ${geminiKeyCount} key(s) configured (GROQ_API_KEY fallback ` +
+      (process.env.GROQ_API_KEY ? "present" : "NOT set — Gemini failures would not have a fallback") +
+      ").",
+  );
 }
 
 // ---------------------------------------------------------------------------
