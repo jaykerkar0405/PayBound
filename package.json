@@ -14,6 +14,7 @@
     "lint:root": "eslint .",
     "test": "turbo run test",
     "check-types": "turbo run check-types",
+    "e2e:live": "pnpm --filter broker e2e:live",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
