@@ -28,11 +28,18 @@ function seedOne(price = "10.00") {
   return { resourceId, price };
 }
 
-/** Minimal valid request body for POST /issue. */
+/**
+ * Minimal valid request body for POST /issue. `taskDefinition` includes a
+ * fresh nonce on every call — a fixed literal would give every caller of
+ * this helper the same taskHash, which (since the resourceId is always
+ * freshly randomized via seedOne()) would collide with the
+ * one-resource-per-task check across repeated runs against the same
+ * persistent broker.db file, not just within a single run.
+ */
 function validBody(overrides: Partial<Record<string, unknown>> = {}) {
   const { resourceId, price } = seedOne();
   return {
-    taskDefinition: { description: "test task" },
+    taskDefinition: { description: "test task", nonce: randomUUID() },
     resourceId,
     exactAmount: price,
     paymentRequest: { detail: "test" },
@@ -114,11 +121,7 @@ describe("POST /issue", () => {
 
 describe("POST /issue — task budget creation (task 6.x)", () => {
   it("creates a task budget synchronously, so the issued capability can immediately be paid end-to-end", async () => {
-    // Unique taskDefinition: validBody()'s default is a fixed literal,
-    // fine for issue-only tests but unsafe here since this test actually
-    // pays — a fixed taskHash would collide with leftover spentSoFar from
-    // a prior run of this same test against the shared broker.db file.
-    const body = validBody({ taskDefinition: { description: "test task", nonce: randomUUID() } });
+    const body = validBody();
 
     const issueRes = await postIssue(body);
     expect(issueRes.status).toBe(200);
@@ -183,5 +186,113 @@ describe("POST /issue — task budget creation (task 6.x)", () => {
     const secondPayBody = (await secondPayRes.json()) as { authorized?: boolean; reason?: string };
     expect(secondPayBody.authorized).toBe(false);
     expect(secondPayBody.reason).toBe("BUDGET_EXCEEDED");
+  });
+});
+
+describe("POST /issue — one resource per task (task 6.x follow-up)", () => {
+  /**
+   * Reproduces the exact scenario from the investigation of PR #73:
+   * Task T + Resource A (price 10) issued first, then Resource B
+   * (price 25) issued under the SAME taskHash. Before this fix, the
+   * second call silently succeeded and froze maxTotalSpend at 10 (A's
+   * price alone) — B's own, perfectly valid 25-priced capability then
+   * failed BUDGET_EXCEEDED at /pay time even completely fresh, since
+   * 0 + 25 > 10 regardless of anything else ever being paid.
+   */
+  it("rejects a second /issue for the same taskDefinition naming a DIFFERENT resourceId, before issuing anything (A=10 first, B=25 second)", async () => {
+    const taskDefinition = { scenario: "A-then-B", nonce: randomUUID() };
+    const { resourceId: resourceA } = seedOne("10.00");
+    const { resourceId: resourceB } = seedOne("25.00");
+
+    const issueA = await postIssue({
+      taskDefinition,
+      resourceId: resourceA,
+      exactAmount: "10.00",
+      paymentRequest: { detail: "A" },
+      session: "sandbox-public-key",
+    });
+    expect(issueA.status).toBe(200);
+    const { capabilityId: capabilityIdA } = (await issueA.json()) as { capabilityId: string };
+
+    const issueB = await postIssue({
+      taskDefinition,
+      resourceId: resourceB,
+      exactAmount: "25.00",
+      paymentRequest: { detail: "B" },
+      session: "sandbox-public-key",
+    });
+
+    expect(issueB.status).toBe(409);
+    const issueBBody = (await issueB.json()) as { error: string; message: string };
+    expect(issueBBody.error).toBe("task_resource_mismatch");
+    expect(typeof issueBBody.message).toBe("string");
+
+    // No orphan capability was issued for the rejected request: B's
+    // exactAmount never even reached issueCapability().
+    const taskHash = hashCanonical(taskDefinition);
+    const task = getTask(taskHash);
+    expect(task?.maxTotalSpend).toBe("10.00");
+
+    // A, the capability that actually established the binding, is
+    // completely unaffected and still pays normally.
+    const payA = await postPay({ capabilityId: capabilityIdA });
+    expect(payA.status).toBe(200);
+    const payABody = (await payA.json()) as { state?: { status: string } };
+    expect(payABody.state?.status).toBe("SUBMITTED");
+  });
+
+  /** Same scenario, reversed order: confirms the check isn't A/B-specific — whichever resource issues first wins the binding, and the other is rejected regardless of which is more/less expensive. */
+  it("rejects a second /issue for the same taskDefinition naming a DIFFERENT resourceId, reverse order (B=25 first, A=10 second)", async () => {
+    const taskDefinition = { scenario: "B-then-A", nonce: randomUUID() };
+    const { resourceId: resourceA } = seedOne("10.00");
+    const { resourceId: resourceB } = seedOne("25.00");
+
+    const issueB = await postIssue({
+      taskDefinition,
+      resourceId: resourceB,
+      exactAmount: "25.00",
+      paymentRequest: { detail: "B" },
+      session: "sandbox-public-key",
+    });
+    expect(issueB.status).toBe(200);
+
+    const issueA = await postIssue({
+      taskDefinition,
+      resourceId: resourceA,
+      exactAmount: "10.00",
+      paymentRequest: { detail: "A" },
+      session: "sandbox-public-key",
+    });
+
+    expect(issueA.status).toBe(409);
+    const issueABody = (await issueA.json()) as { error: string; message: string };
+    expect(issueABody.error).toBe("task_resource_mismatch");
+
+    const taskHash = hashCanonical(taskDefinition);
+    const task = getTask(taskHash);
+    expect(task?.maxTotalSpend).toBe("25.00");
+  });
+
+  it("allows a second /issue for the same taskDefinition naming the SAME resourceId (no regression to the existing shared-task path)", async () => {
+    const taskDefinition = { scenario: "same-resource-twice", nonce: randomUUID() };
+    const { resourceId } = seedOne("10.00");
+
+    const first = await postIssue({
+      taskDefinition,
+      resourceId,
+      exactAmount: "10.00",
+      paymentRequest: { detail: "first" },
+      session: "sandbox-public-key",
+    });
+    expect(first.status).toBe(200);
+
+    const second = await postIssue({
+      taskDefinition,
+      resourceId,
+      exactAmount: "10.00",
+      paymentRequest: { detail: "second" },
+      session: "sandbox-public-key",
+    });
+    expect(second.status).toBe(200);
   });
 });

@@ -72,10 +72,38 @@ Task {
 - **`task_hash`** — the same canonical task hash referenced by every
   capability issued against this task.
 - **`max_total_spend`** — the task's declared spending ceiling, across all
-  capabilities issued against it.
+  capabilities issued against it **for the single resource the task is
+  bound to** (see "One resource per task" below).
 - **`spent_so_far`** — the running total spent against this task,
   Broker-maintained and atomically updated. Checked in the invariant as
   `(task.spent_so_far + payment.amount) ≤ task.max_total_spend`.
+
+### One resource per task (deliberate scope decision)
+
+**A task's budget is bound to a single resource.** Many capabilities can
+be issued against the same `task_hash` *and* the same `resource_id` over
+the task's lifetime — that's the "many capabilities, one shared budget"
+model `max_total_spend` describes. A single `task_hash` cannot span
+*multiple different* resources: the first `resource_id` ever issued
+against a given `task_hash` binds that task to that resource for good.
+
+This is a deliberate scope decision, not a limitation to be lifted later.
+`max_total_spend` is a single decimal value, derived from one resource's
+registry price (see below) — it has no principled way to size itself for
+multiple different resource prices sharing one task without picking a
+number that's simply wrong for at least one of them. An earlier version
+of the implementation didn't enforce this and let a second `/issue` call
+for a different resource silently succeed while leaving `max_total_spend`
+frozen at whatever the *first* resource's price happened to be — an
+investigation into that behavior found this produces confusing,
+order-dependent `BUDGET_EXCEEDED` rejections of otherwise perfectly valid,
+correctly-priced capabilities (a capability for a pricier resource, issued
+second under a task whose budget was frozen at a cheaper resource's price,
+can never be paid at all — even completely fresh, with nothing else ever
+spent against the task). `apps/broker/src/routes/issue.ts` now rejects
+such a request outright (`409 task_resource_mismatch`), before issuing
+anything, rather than allowing it to silently succeed and fail later at
+`/pay` with a misleading `BUDGET_EXCEEDED`.
 
 ### How a `Task` row actually gets created
 
@@ -93,15 +121,15 @@ endpoint, no runtime mutation), this means a caller of `/issue` has no way
 to name or influence its own spending cap: the value is entirely
 registry-derived.
 
-Idempotent by design: a `Task` is meant to have multiple capabilities
-issued against it over its lifetime (see `max_total_spend`'s definition
-above — a ceiling "across all capabilities issued against it," not a
-per-capability allowance). `/issue` only creates the `Task` row when none
-exists yet for that `task_hash`; a second `/issue` call for the same task
-definition issues another capability against the already-funded task
-rather than erroring or re-funding it. A task's budget, sized to exactly
-one resource's price, is naturally exhausted by the first payment against
-it — a second capability issued against the same task will correctly hit
+Idempotent by design, within the one-resource-per-task constraint above: a
+`Task` is meant to have multiple capabilities issued against it over its
+lifetime, all for the same resource. `/issue` only creates the `Task` row
+when none exists yet for that `task_hash`; a second `/issue` call for the
+same task definition *and the same resource* issues another capability
+against the already-funded task rather than erroring or re-funding it. A
+task's budget, sized to exactly one resource's price, is naturally
+exhausted by the first payment against it — a second capability issued
+against the same task (for the same resource) will correctly hit
 `BUDGET_EXCEEDED` (clause 9) at `/pay` time, not a bug.
 
 ## MVP constraint: one active capability per session

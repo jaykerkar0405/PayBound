@@ -3,8 +3,9 @@ import { zValidator } from "@hono/zod-validator";
 import { issueRequestSchema } from "@paybound/capability-spec";
 import { issueCapability, getCapabilityRecord } from "../issuer.js";
 import { checkSpendPolicy } from "../cre-policy.js";
-import { createTask, getTask } from "../budget.js";
+import { createTask, getTask, getTaskResourceId } from "../budget.js";
 import { getResourceById } from "../registry.js";
+import { hashCanonical } from "../hash.js";
 
 /**
  * POST /issue — HTTP endpoint for capability issuance.
@@ -19,6 +20,8 @@ import { getResourceById } from "../registry.js";
  * Error handling mirrors pay.ts:
  *  - 400 on schema validation failure (zValidator callback)
  *  - 404 when `resourceId` is not in the registry
+ *  - 409 when `taskDefinition` already names a task bound to a
+ *    *different* resourceId (`TASK_RESOURCE_MISMATCH` — see below)
  *  - 422 when `exactAmount` doesn't match the registry price
  *
  * Task budget creation (task 6.x, closing the gap where an issued
@@ -33,18 +36,30 @@ import { getResourceById } from "../registry.js";
  * derived: the registry is closed and immutable at runtime (registry.ts),
  * so nothing about this lets a caller of `/issue` (a less-trusted caller
  * than whoever seeds the registry/creates tasks directly today) name or
- * influence its own spending cap — see the accompanying PR description
- * for the full risk analysis.
+ * influence its own spending cap.
  *
- * Idempotent by design, not by accident: a `Task` is meant to have
- * multiple capabilities issued against it over its lifetime
- * (CAPABILITY_SPEC.md: `max_total_spend` is a ceiling "across all
- * capabilities issued against it", not a per-capability allowance).
- * `createTask()` itself throws on a duplicate `taskHash` (its PRIMARY KEY),
- * so this only calls it when no task exists yet for this `taskHash` —
- * a second `/issue` call for the same task definition just issues another
+ * **One resource per task (deliberate scope decision, not a TODO):** a
+ * task's budget is bound to the single resourceId it was first created
+ * for. Many capabilities can be issued against that same task+resource
+ * pair over the task's lifetime (CAPABILITY_SPEC.md: `max_total_spend` is
+ * a ceiling "across all capabilities issued against it", not a
+ * per-capability allowance) — a second `/issue` call for the same
+ * `taskDefinition` *and* the same `resourceId` just issues another
  * capability against the already-funded task, leaving its existing
- * budget/spentSoFar untouched, rather than erroring or double-funding it.
+ * budget/spentSoFar untouched.
+ *
+ * A second `/issue` call for the same `taskDefinition` but a *different*
+ * `resourceId` is rejected outright with `409 TASK_RESOURCE_MISMATCH`,
+ * checked before `issueCapability()` is even called (so no orphan
+ * capability gets issued for a request that's ultimately refused). This
+ * was deliberately narrowed from an earlier, broader "one task, many
+ * resources" reading of CAPABILITY_SPEC.md: `maxTotalSpend`, derived from
+ * a single resource's price, has no principled way to size itself for
+ * multiple different resource prices sharing one task without silently
+ * picking whichever `/issue` call happened to run first — which produced
+ * confusing, order-dependent `BUDGET_EXCEEDED` rejections of otherwise
+ * perfectly valid capabilities. See `budget.ts`'s `getTaskResourceId` for
+ * how the binding is persisted and read.
  */
 export const issueRoute = new Hono();
 
@@ -74,6 +89,25 @@ issueRoute.post(
       );
     }
 
+    // One-resource-per-task check (task 6.x follow-up) — checked before
+    // issueCapability() is called at all, so a rejected request never
+    // leaves behind an orphan, never-payable capability. See this file's
+    // top doc comment for the full reasoning.
+    const taskHash = hashCanonical(taskDefinition);
+    const boundResourceId = getTaskResourceId(taskHash);
+    if (boundResourceId !== undefined && boundResourceId !== null && boundResourceId !== resourceId) {
+      return c.json(
+        {
+          error: "task_resource_mismatch",
+          message:
+            `taskDefinition already names a task bound to resourceId "${boundResourceId}"; ` +
+            `this request named a different resourceId "${resourceId}". A task's budget is ` +
+            `bound to a single resource — see CAPABILITY_SPEC.md.`,
+        },
+        409,
+      );
+    }
+
     try {
       const result = issueCapability({
         taskDefinition,
@@ -100,7 +134,7 @@ issueRoute.post(
             `POST /issue: issueCapability() succeeded for resourceId "${record.capability.resourceId}" but getResourceById found no registry entry for it`,
           );
         }
-        createTask(record.capability.taskHash, resource.price);
+        createTask(record.capability.taskHash, resource.price, record.capability.resourceId);
       }
 
       return c.json({ capabilityId: result.capabilityId, expiry: result.expiry }, 200);
