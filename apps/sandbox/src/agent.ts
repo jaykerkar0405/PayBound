@@ -12,9 +12,8 @@
  *    network egress policy).
  */
 
-import { randomUUID } from "node:crypto";
 import { generateText, stepCountIs, type Tool } from "ai";
-import { capabilityIdSchema, type CapabilityId } from "@paybound/capability-spec";
+import { type CapabilityId } from "@paybound/capability-spec";
 import { initializeAttestation } from "./index.js";
 import type { SandboxAttestation } from "./attestation.js";
 import type { HandshakeOutcome } from "./attest-handshake.js";
@@ -219,6 +218,15 @@ export async function runAgentLoop(options: RunAgentLoopOptions): Promise<RunAge
  * The ordering matters: the identity exists before it is proven, it is
  * proven before a capability is requested against it, and all of that
  * happens before Step 3 reads a single byte of untrusted content.
+ *
+ * Fails loudly if neither `capabilityId` nor `issueCapability` is provided,
+ * rather than fabricating a fake, never-issued capabilityId (audit finding
+ * 2.5). A self-minted UUID would satisfy `capabilityIdSchema` but was never
+ * actually issued by a broker — it would only fail later, confusingly, as a
+ * 404 at `/pay`, far from the actual point of misconfiguration. Phase 6's
+ * live agent entrypoint is built on top of this function, so a caller that
+ * forgets to wire capability issuance needs to find out immediately, not
+ * after the agent loop has already started reading untrusted content.
  */
 export async function runSandboxLifecycle(
   options: SandboxLifecycleOptions,
@@ -249,7 +257,11 @@ export async function runSandboxLifecycle(
     if (options.issueCapability) {
       capabilityId = await options.issueCapability(identity.publicKey);
     } else {
-      capabilityId = capabilityIdSchema.parse(randomUUID());
+      throw new Error(
+        "runSandboxLifecycle: no capabilityId and no issueCapability " +
+          "callback provided — cannot proceed without a real, broker-issued " +
+          "capability",
+      );
     }
   }
 
