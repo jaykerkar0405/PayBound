@@ -1,8 +1,10 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { issueRequestSchema } from "@paybound/capability-spec";
-import { issueCapability } from "../issuer.js";
+import { issueCapability, getCapabilityRecord } from "../issuer.js";
 import { checkSpendPolicy } from "../cre-policy.js";
+import { createTask, getTask } from "../budget.js";
+import { getResourceById } from "../registry.js";
 
 /**
  * POST /issue — HTTP endpoint for capability issuance.
@@ -10,16 +12,39 @@ import { checkSpendPolicy } from "../cre-policy.js";
  * Accepts the five fields that `issueCapability()` requires
  * (`taskDefinition`, `resourceId`, `exactAmount`, `paymentRequest`,
  * `session`), validates them with `issueRequestSchema`, calls
- * `issueCapability()`, and returns `{ capabilityId, expiry }` on success.
+ * `issueCapability()`, synchronously creates the task's budget record
+ * (task 6.x — see below), and returns `{ capabilityId, expiry }` on
+ * success.
  *
  * Error handling mirrors pay.ts:
  *  - 400 on schema validation failure (zValidator callback)
  *  - 404 when `resourceId` is not in the registry
  *  - 422 when `exactAmount` doesn't match the registry price
  *
- * Explicit non-goals: this route does not call `createTask()` (budget.ts),
- * add authentication, or make the issued capability immediately payable
- * end-to-end — that wiring belongs to task 6.1.
+ * Task budget creation (task 6.x, closing the gap where an issued
+ * capability could never be paid — `/pay` threw looking up a task budget
+ * row that was never created):
+ *
+ * `maxTotalSpend` is derived from the resource registry's own `price` for
+ * `resourceId` — read back from the just-persisted `CapabilityRecord`
+ * (`getCapabilityRecord`), not from the request body's `exactAmount`
+ * field, even though `issueCapability()` already guarantees the two are
+ * equal by this point. This keeps the value entirely server/registry-
+ * derived: the registry is closed and immutable at runtime (registry.ts),
+ * so nothing about this lets a caller of `/issue` (a less-trusted caller
+ * than whoever seeds the registry/creates tasks directly today) name or
+ * influence its own spending cap — see the accompanying PR description
+ * for the full risk analysis.
+ *
+ * Idempotent by design, not by accident: a `Task` is meant to have
+ * multiple capabilities issued against it over its lifetime
+ * (CAPABILITY_SPEC.md: `max_total_spend` is a ceiling "across all
+ * capabilities issued against it", not a per-capability allowance).
+ * `createTask()` itself throws on a duplicate `taskHash` (its PRIMARY KEY),
+ * so this only calls it when no task exists yet for this `taskHash` —
+ * a second `/issue` call for the same task definition just issues another
+ * capability against the already-funded task, leaving its existing
+ * budget/spentSoFar untouched, rather than erroring or double-funding it.
  */
 export const issueRoute = new Hono();
 
@@ -57,6 +82,26 @@ issueRoute.post(
         paymentRequest,
         session,
       });
+
+      // Task budget creation (task 6.x) — see this file's top doc comment
+      // for the full reasoning. Read back the just-persisted record rather
+      // than trusting request-body fields directly.
+      const record = getCapabilityRecord(result.capabilityId);
+      if (record === undefined) {
+        throw new Error(
+          `POST /issue: capability "${result.capabilityId}" was just issued but getCapabilityRecord found no record for it`,
+        );
+      }
+
+      if (getTask(record.capability.taskHash) === undefined) {
+        const resource = getResourceById(record.capability.resourceId);
+        if (resource === undefined) {
+          throw new Error(
+            `POST /issue: issueCapability() succeeded for resourceId "${record.capability.resourceId}" but getResourceById found no registry entry for it`,
+          );
+        }
+        createTask(record.capability.taskHash, resource.price);
+      }
 
       return c.json({ capabilityId: result.capabilityId, expiry: result.expiry }, 200);
     } catch (err: unknown) {
