@@ -183,7 +183,7 @@ Then, in another terminal:
 pnpm --filter broker dev   # or: pnpm --filter broker build && pnpm --filter broker start
 ```
 
-`GET /health` and `POST /pay` are the only two HTTP routes. **There is currently no HTTP route or CLI to seed the resource registry, create a task budget, or issue a capability** — `seedRegistry`/`createTask`/`issueCapability` (`apps/broker/src/registry.ts`, `budget.ts`, `issuer.ts`) are only ever invoked from the test suite today. To drive `/pay` manually, call those functions yourself from a one-off script pointed at the broker's `DB_PATH`, or read `apps/broker/src/__tests__/pay-route.test.ts` for a worked example.
+`GET /health`, `POST /issue`, and `POST /pay` are the three HTTP routes. `POST /issue` accepts `{ taskDefinition, resourceId, exactAmount, paymentRequest, session }`, atomically creates the task budget on first call for a given task hash, and returns `{ capabilityId, expiry }`. See `apps/broker/src/routes/issue.ts` and `apps/broker/src/__tests__/issue-route.test.ts` for the full schema and worked examples. To seed the resource registry before issuing, call `seedRegistry` from a one-off script pointed at the broker's `DB_PATH` (see `apps/broker/src/scripts/` for examples).
 
 Without a running Speculos instance (and with `LEDGER_SIGNING_ENABLED` left at its default `true`), both `pnpm --filter broker test` and any real `POST /pay` call will fail — the test suite fails fast with an explicit error; a live `/pay` call instead hangs until the signer's own timeout and then returns a 500. Set `LEDGER_SIGNING_ENABLED=false` to fall back to the Phase 1 stub signer if you don't need real signing.
 
@@ -195,7 +195,13 @@ Copy `apps/sandbox/.env.example` to `.env.local`. `BROKER_HOST` defaults to `hos
 pnpm --filter sandbox dev
 ```
 
-Note: this entrypoint (`apps/sandbox/src/index.ts`'s `main()`) only establishes the sandbox's attested workload identity and logs it — it does not run the agent loop or make any payment. The actual agent loop (`runAgentLoop`/`runSandboxLifecycle` in `apps/sandbox/src/agent.ts`) is currently exercised only by the test suite and by `apps/sandbox/demo/network-boundary-demo.sh` (which demonstrates the network egress boundary, not a payment). To containerize and run the sandbox's egress isolation live, see that script and `apps/sandbox/Dockerfile`.
+Note: this entrypoint (`apps/sandbox/src/index.ts`'s `main()`) only establishes the sandbox's attested workload identity and logs it. The full agent loop is driven by `apps/sandbox/src/live-run.ts`, which runs a real LLM (Gemini primary, Groq fallback) through the complete lifecycle — capability issuance, untrusted content fetch, payment, Hedera settlement. Run the entire path end-to-end with real credentials via:
+
+```bash
+pnpm e2e:live   # from the repo root — requires .env with HEDERA_ and LLM API key vars set
+```
+
+To containerize and run the sandbox's egress isolation live, see `apps/sandbox/demo/network-boundary-demo.sh` and `apps/sandbox/Dockerfile`.
 
 ### Demo dashboard (`apps/demo`)
 
@@ -208,17 +214,52 @@ This is currently the unmodified SvelteKit scaffold — it does not yet render a
 ## Project Status
 
 PayBound is in early development. The specification (capability object, state machine, signing model, and formal invariant) is defined. The reference broker implementation, sandbox isolation, and agent integration are in progress.
+PayBound is **functionally complete** across all six implementation phases and has been verified end-to-end against a live running broker, real Hedera testnet settlement, and real HCS audit topics. The submission deadline is **September 13, 2026**.
+
+### Phase completion
+
+| Phase | Description | Status |
+|---|---|---|
+| **0** | Specification (THREAT_MODEL, SECURITY_INVARIANT, CAPABILITY_SPEC, ARCHITECTURE, PROTOCOL) | ✅ Complete |
+| **1** | Broker & Capability Core (issuer, state machine, `authorize`, `POST /pay`, `POST /issue`, property tests) | ✅ Complete |
+| **2** | Sandbox, Agent & Attack Scenarios (egress isolation, agent loop, 3 attack scenarios, network boundary demo) | ✅ Complete |
+| **3** | Key Management / Ledger Integration (Speculos-backed signing; real hardware deferred) | ✅ Complete\* |
+| **4** | Settlement & Audit Trail (Hedera testnet settlement, HCS audit trail, SUBMITTED→SETTLED/FAILED reconciliation) | ✅ Complete |
+| **5** | Chainlink CRE confidential policy check (design + optional gated integration) | ✅ Complete |
+| **6** | End-to-end integration & demo (`pnpm e2e:live`, real LLM provider, live agent entrypoint) | ✅ Core complete |
+
+\* Ledger signing is backed by the [Speculos](https://github.com/LedgerHQ/speculos) hardware emulator running the real `app-hedera.elf` binary — not a physical device. The emulator produces identical on-device confirmations and is the configuration used for all live verification runs.
+
+### What is verifiably working
+
+- **`POST /issue`** — capability issuance: validates resource + price, atomically creates the task budget, fires an HCS audit event, and returns a signed `{ capabilityId, expiry }`. Optional Chainlink CRE spend-cap check gated behind `CRE_ENABLED`.
+- **`POST /pay`** — payment execution: enforces all 9 invariant clauses from `SECURITY_INVARIANT.md` (replay protection, nonce burn, field matching, budget check, destination immutability), submits to Hedera testnet, persists settlement state.
+- **`SUBMITTED → SETTLED/FAILED` reconciliation** — two-stage lookup (consensus-node receipt → mirror-node REST fallback) with `hedera_transaction_id` persisted for startup sweep recovery after broker crash.
+- **HCS audit trail** — every capability issuance, authorization decision, and settlement outcome is logged as a Hedera Consensus Service message on topics `0.0.10423726` / `0.0.10423727`, independently verifiable on [HashScan](https://hashscan.io/testnet).
+- **Sandbox egress isolation** — Docker-based network policy blocks all routes to payment infrastructure (wallet, RPC, facilitator) except the single authenticated broker channel. Demonstrated live by `apps/sandbox/demo/network-boundary-demo.sh`.
+- **Attack scenario tests** — three adversarial scenarios (prompt injection targeting destination/amount, direct payment infra bypass, capability replay/reuse) all fail structurally, not by detection.
+- **Attestation handshake** — `POST /attest/challenge` + `POST /attest/verify` implemented in broker and sandbox (`ATTESTATION_ENABLED` flag; **off by default** in the demo configuration — the 9 invariant clauses hold regardless).
+- **`pnpm e2e:live`** — one command runs the full path: task definition → `POST /issue` → real LLM agent run with untrusted content → `POST /pay` → Hedera settlement → HCS log. Requires real `.env` credentials.
+
+### What is not yet complete
+
+- **6.3** — Live demo script/recording
+- **6.5** — Final integrated property test pass
+- **6.6** — Submission packaging
+- **3.1** — Real Ledger hardware (Speculos emulator used throughout)
 
 ## Roadmap
 
-- [ ] `SECURITY_INVARIANT.md`: formal statement of the invariant
-- [ ] `THREAT_MODEL.md`: full trusted/adversarial boundary definition
-- [ ] `CAPABILITY_SPEC.md`: capability object and state machine reference
-- [ ] Property tests against a broker stub covering replay, substitution, escalation, stale nonces, mismatched sessions, mismatched task hashes, concurrent payments, and malformed responses
-- [ ] Reference broker implementation
-- [ ] Sandbox network isolation layer
-- [ ] Reference agent integration
-- [x] [End-to-end example and walkthrough](./docs/WALKTHROUGH.md)
+- [x] `SECURITY_INVARIANT.md`: formal statement of the invariant
+- [x] `THREAT_MODEL.md`: full trusted/adversarial boundary definition
+- [x] `CAPABILITY_SPEC.md`: capability object and state machine reference
+- [x] Property tests against a broker stub covering replay, substitution, escalation, stale nonces, mismatched sessions, mismatched task hashes, concurrent payments, and malformed responses
+- [x] Reference broker implementation (`POST /issue`, `POST /pay`, `Broker.authorize`)
+- [x] Sandbox network isolation layer (Docker egress policy, `network-boundary-demo.sh`)
+- [x] Reference agent integration (real LLM via `runSandboxLifecycle`, `apps/sandbox/src/live-run.ts`)
+- [x] End-to-end live path (`pnpm e2e:live`) — task definition → issuance → agent → payment → Hedera settlement + HCS log
+- [x] [End-to-end example and walkthrough doc](./docs/WALKTHROUGH.md)
+- [ ] Live demo script / recording (task 6.3)
 
 ## Contributing
 
