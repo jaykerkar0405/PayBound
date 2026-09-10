@@ -152,8 +152,15 @@ can start once 1.7 exists.
       verifiable audit trail: log capability issuance, authorization decisions,
       and settlement outcomes as HCS messages. Real HCS topics confirmed on
       HashScan. PR #50 merged. *(Settlement)*
-- [ ] **4.3** Update the payment state machine's `SUBMITTED -> SETTLED/FAILED`
+- [x] **4.3** Update the payment state machine's `SUBMITTED -> SETTLED/FAILED`
       transition to reflect real Hedera settlement results instead of a stub.
+      `settleAndRecord` (apps/broker/src/settlement.ts) maps real Hedera
+      submission results to SETTLED/FAILED/RECOVERABLE. RECOVERABLE
+      reconciliation queries Hedera by transaction ID via a two-stage
+      lookup — consensus-node receipt first, falling back to the mirror-node
+      REST API once the consensus receipt expires from cache — with the
+      transaction ID persisted so a startup sweep can reconcile payments left
+      RECOVERABLE by a broker crash. PRs #64, #68, #71 merged.
       Note (per CAPABILITY_SPEC.md "Triggering conditions for RECOVERABLE and
       FAILED", task 0.3.1b): implementing the `RECOVERABLE` path requires
       querying Hedera by transaction ID for reconciliation, not just retry
