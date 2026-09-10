@@ -77,6 +77,33 @@ Task {
   Broker-maintained and atomically updated. Checked in the invariant as
   `(task.spent_so_far + payment.amount) ≤ task.max_total_spend`.
 
+### How a `Task` row actually gets created
+
+`POST /issue` (`apps/broker/src/routes/issue.ts`, task 6.x) creates the
+`Task` row synchronously, in the same request as capability issuance, the
+first time a given `task_hash` is issued against — closing the gap where
+an issued capability had no budget row to reserve against at `/pay` time.
+
+`max_total_spend` is set to the resource registry's own `price` for the
+capability's `resource_id` (`registry.ts`'s `getResourceById`) — never
+from the request body's `exact_amount` field directly, even though
+`issueCapability()` already guarantees the two are equal by this point.
+Since the registry is closed and immutable at runtime (no seeding
+endpoint, no runtime mutation), this means a caller of `/issue` has no way
+to name or influence its own spending cap: the value is entirely
+registry-derived.
+
+Idempotent by design: a `Task` is meant to have multiple capabilities
+issued against it over its lifetime (see `max_total_spend`'s definition
+above — a ceiling "across all capabilities issued against it," not a
+per-capability allowance). `/issue` only creates the `Task` row when none
+exists yet for that `task_hash`; a second `/issue` call for the same task
+definition issues another capability against the already-funded task
+rather than erroring or re-funding it. A task's budget, sized to exactly
+one resource's price, is naturally exhausted by the first payment against
+it — a second capability issued against the same task will correctly hit
+`BUDGET_EXCEEDED` (clause 9) at `/pay` time, not a bug.
+
 ## MVP constraint: one active capability per session
 
 Exactly one active capability may exist per session at any time. This isn't
