@@ -16,12 +16,13 @@ the authoritative statement of that boundary.
   objects from trusted task state.
 - **Broker** — the sole authority behind `Broker.authorize(payment)`; the
   only component that constructs and signs a real payment.
-- **Sandbox attestation** — the sandbox's attested workload identity,
-  established before the agent is exposed to any untrusted content. When
-  enabled it authenticates the channel to the Broker; it does not by
-  itself authorize any individual payment. **Off in the as-shipped and
-  as-demoed configuration — see "Sandbox attestation: what is actually
-  enforced" below before relying on this line.**
+- **Sandbox attestation** — **optional, off by default** (see "Sandbox
+  attestation: what is actually enforced" below). When
+  `ATTESTATION_ENABLED=true`, it authenticates the channel to the Broker
+  via challenge-response before any individual payment is authorized. In
+  the as-shipped and as-demoed default state, this control is not active
+  — treat this entry as aspirational, not enforced, unless that flag is
+  set.
 - **Payment facilitator** (partially — see "explicitly out of scope" below).
 - **Settlement network**.
 
