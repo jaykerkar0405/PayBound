@@ -12,6 +12,7 @@ import { submitPayment } from "../state-machine.js";
 import { resolveSigner } from "../signer.js";
 import { auditAuthorizationDecision } from "../hcs-audit.js";
 import { settleAndRecord } from "../settlement.js";
+import { isAttestationEnabled, isAttested } from "../attestation.js";
 
 /**
  * POST /pay — the single wire call the agent sandbox is allowed to make
@@ -44,6 +45,29 @@ payRoute.post(
     const record = getCapabilityRecord(capabilityId);
     if (record === undefined) {
       return c.json({ error: "capability_not_found", capabilityId }, 404);
+    }
+
+    // Sandbox attestation channel check (task 2.3, docs/PROTOCOL.md §5).
+    // Gated off by default; fail-closed when ATTESTATION_ENABLED=true.
+    //
+    // Checked against `record.capability.session` — the session this
+    // capability was bound to at issuance — not a request-body field,
+    // because PayRequest deliberately has exactly one parameter
+    // (`capabilityId`) and gains none here. That also means this check
+    // and clause 5 (`payment.session == capability.session`) are asking
+    // about the same session value from two independent angles: clause 5
+    // is untouched field equality inside Broker.authorize(); this is a
+    // channel-level pre-check that runs before authorize() is called.
+    if (isAttestationEnabled() && !isAttested(record.capability.session)) {
+      return c.json(
+        {
+          error: "attestation_required",
+          message:
+            `No live attestation for session "${record.capability.session}". Complete the ` +
+            "channel handshake (POST /attest/challenge, then POST /attest/verify) before paying.",
+        },
+        401,
+      );
     }
 
     const task = getTask(record.capability.taskHash);
