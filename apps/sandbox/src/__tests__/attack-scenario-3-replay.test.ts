@@ -68,13 +68,13 @@ class BrokerSimulator {
     const id = capabilityIdSchema.parse(randomUUID());
     const capability: StoredCapability = {
       capabilityId: id,
-      taskHash: "0x" + "a".repeat(64),
-      resourceId: "r-service-" + randomUUID().slice(0, 8),
+      taskHash: "a".repeat(64),
+      resourceId: randomUUID(),
       recipient: options.recipient ?? LEGITIMATE_RECIPIENT,
       exactAmount: options.exactAmount ?? LEGITIMATE_AMOUNT,
-      paymentRequestHash: "0x" + "b".repeat(64),
+      paymentRequestHash: "b".repeat(64),
       session: "302a300506032b6570032100" + "0".repeat(64),
-      nonce: "nonce-" + randomUUID(),
+      nonce: randomUUID(),
       expiry: options.expiry ?? new Date(Date.now() + 300_000).toISOString(),
       maxUses: 1,
       consumed: false,

@@ -8,7 +8,7 @@ import { hashCanonical } from "../hash.js";
 import { reservePayment, submitPayment, resolveSubmission } from "../state-machine.js";
 
 function setUpCapability(overrides: { maxTotalSpend?: string; price?: string } = {}) {
-  const taskHash = randomUUID();
+  const taskHash = hashCanonical(randomUUID());
   const resourceId = randomUUID();
   const price = overrides.price ?? "10.00";
 

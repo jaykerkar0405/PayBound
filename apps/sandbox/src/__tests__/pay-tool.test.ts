@@ -46,16 +46,16 @@ describe("Agent Sandbox Payment Tool (Task 2.4)", () => {
     });
   });
 
-  const validCapabilityId = "c1234567-89ab-cdef-0123-456789abcdef" as CapabilityId;
+  const validCapabilityId = "c1234567-89ab-4def-8123-456789abcdef" as CapabilityId;
 
   const validPublicSubmittedState: PublicSubmittedPaymentState = {
     status: "SUBMITTED",
     capability: {
-      taskHash: "0x1234567890abcdef",
-      resourceId: "r1234567-89ab-cdef-0123-456789abcdef",
+      taskHash: "a".repeat(64),
+      resourceId: "11111111-1111-4111-8111-111111111111",
       recipient: "0x9876543210fedcba",
       exactAmount: "10.50",
-      paymentRequestHash: "0xabcdef1234567890",
+      paymentRequestHash: "b".repeat(64),
       session: "302a300506032b6570032100" + "0".repeat(64),
       expiry: "2026-12-31T23:59:59.000Z",
       maxUses: 1,
@@ -63,11 +63,11 @@ describe("Agent Sandbox Payment Tool (Task 2.4)", () => {
     reservedFrom: {
       status: "RESERVED",
       capability: {
-        taskHash: "0x1234567890abcdef",
-        resourceId: "r1234567-89ab-cdef-0123-456789abcdef",
+        taskHash: "a".repeat(64),
+        resourceId: "11111111-1111-4111-8111-111111111111",
         recipient: "0x9876543210fedcba",
         exactAmount: "10.50",
-        paymentRequestHash: "0xabcdef1234567890",
+        paymentRequestHash: "b".repeat(64),
         session: "302a300506032b6570032100" + "0".repeat(64),
         expiry: "2026-12-31T23:59:59.000Z",
         maxUses: 1,
@@ -75,11 +75,11 @@ describe("Agent Sandbox Payment Tool (Task 2.4)", () => {
       issuedFrom: {
         status: "ISSUED",
         capability: {
-          taskHash: "0x1234567890abcdef",
-          resourceId: "r1234567-89ab-cdef-0123-456789abcdef",
+          taskHash: "a".repeat(64),
+          resourceId: "11111111-1111-4111-8111-111111111111",
           recipient: "0x9876543210fedcba",
           exactAmount: "10.50",
-          paymentRequestHash: "0xabcdef1234567890",
+          paymentRequestHash: "b".repeat(64),
           session: "302a300506032b6570032100" + "0".repeat(64),
           expiry: "2026-12-31T23:59:59.000Z",
           maxUses: 1,
