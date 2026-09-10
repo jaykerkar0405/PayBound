@@ -199,11 +199,11 @@ describe("Minimal Agent Loop & Ordering Invariant (Task 2.5)", () => {
 const createValidPublicSubmittedState = (): PublicSubmittedPaymentState => ({
   status: "SUBMITTED",
   capability: {
-    taskHash: "0x1234567890abcdef",
-    resourceId: "r1234567-89ab-cdef-0123-456789abcdef",
+    taskHash: "a".repeat(64),
+    resourceId: "11111111-1111-4111-8111-111111111111",
     recipient: "0x9876543210fedcba",
     exactAmount: "10.50",
-    paymentRequestHash: "0xabcdef1234567890",
+    paymentRequestHash: "b".repeat(64),
     session: "302a300506032b6570032100" + "0".repeat(64),
     expiry: "2026-12-31T23:59:59.000Z",
     maxUses: 1,
@@ -211,11 +211,11 @@ const createValidPublicSubmittedState = (): PublicSubmittedPaymentState => ({
   reservedFrom: {
     status: "RESERVED",
     capability: {
-      taskHash: "0x1234567890abcdef",
-      resourceId: "r1234567-89ab-cdef-0123-456789abcdef",
+      taskHash: "a".repeat(64),
+      resourceId: "11111111-1111-4111-8111-111111111111",
       recipient: "0x9876543210fedcba",
       exactAmount: "10.50",
-      paymentRequestHash: "0xabcdef1234567890",
+      paymentRequestHash: "b".repeat(64),
       session: "302a300506032b6570032100" + "0".repeat(64),
       expiry: "2026-12-31T23:59:59.000Z",
       maxUses: 1,
@@ -223,11 +223,11 @@ const createValidPublicSubmittedState = (): PublicSubmittedPaymentState => ({
     issuedFrom: {
       status: "ISSUED",
       capability: {
-        taskHash: "0x1234567890abcdef",
-        resourceId: "r1234567-89ab-cdef-0123-456789abcdef",
+        taskHash: "a".repeat(64),
+        resourceId: "11111111-1111-4111-8111-111111111111",
         recipient: "0x9876543210fedcba",
         exactAmount: "10.50",
-        paymentRequestHash: "0xabcdef1234567890",
+        paymentRequestHash: "b".repeat(64),
         session: "302a300506032b6570032100" + "0".repeat(64),
         expiry: "2026-12-31T23:59:59.000Z",
         maxUses: 1,

@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { createTask, getTask, tryReserveBudget } from "../budget.js";
+import { hashCanonical } from "../hash.js";
 
 describe("budget", () => {
   it("createTask + getTask returns spentSoFar '0' and the given maxTotalSpend", () => {
-    const taskHash = randomUUID();
+    const taskHash = hashCanonical(randomUUID());
 
     createTask(taskHash, "100.00");
 
@@ -16,7 +17,7 @@ describe("budget", () => {
   });
 
   it("fails to create a task with a taskHash that already exists", () => {
-    const taskHash = randomUUID();
+    const taskHash = hashCanonical(randomUUID());
     createTask(taskHash, "100.00");
 
     expect(() => createTask(taskHash, "999.00")).toThrow();
@@ -30,7 +31,7 @@ describe("budget", () => {
   });
 
   it("reserves an amount that fits within remaining budget, updating spentSoFar", () => {
-    const taskHash = randomUUID();
+    const taskHash = hashCanonical(randomUUID());
     createTask(taskHash, "100.00");
 
     const result = tryReserveBudget(taskHash, "30.00");
@@ -40,7 +41,7 @@ describe("budget", () => {
   });
 
   it("rejects an amount that would exceed maxTotalSpend, leaving spentSoFar unchanged", () => {
-    const taskHash = randomUUID();
+    const taskHash = hashCanonical(randomUUID());
     createTask(taskHash, "100.00");
     tryReserveBudget(taskHash, "90.00");
 
@@ -51,7 +52,7 @@ describe("budget", () => {
   });
 
   it("boundary: an amount that brings spentSoFar to exactly maxTotalSpend succeeds", () => {
-    const taskHash = randomUUID();
+    const taskHash = hashCanonical(randomUUID());
     createTask(taskHash, "100.00");
 
     const result = tryReserveBudget(taskHash, "100.00");
@@ -61,7 +62,7 @@ describe("budget", () => {
   });
 
   it("under concurrent reservation attempts, exactly one succeeds", async () => {
-    const taskHash = randomUUID();
+    const taskHash = hashCanonical(randomUUID());
     createTask(taskHash, "10");
 
     const attempts = Array.from({ length: 20 }, () =>
@@ -75,7 +76,7 @@ describe("budget", () => {
   });
 
   it("is exact on decimal amounts that would drift under naive floating-point arithmetic", () => {
-    const taskHash = randomUUID();
+    const taskHash = hashCanonical(randomUUID());
     createTask(taskHash, "0.3");
 
     expect(tryReserveBudget(taskHash, "0.1")).toBe(true);
