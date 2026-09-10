@@ -18,6 +18,8 @@
     "typescript": "^6.0.3"
   },
   "dependencies": {
+    "@ai-sdk/google": "4.0.67",
+    "@ai-sdk/groq": "4.0.40",
     "@paybound/capability-spec": "workspace:*",
     "@paybound/protocol": "workspace:*",
     "ai": "7.0.92",
