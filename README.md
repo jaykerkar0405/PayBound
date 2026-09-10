@@ -162,6 +162,8 @@ Removing any supporting service does not weaken the core guarantee. The capabili
 
 Prerequisites: Node `>=24`, `pnpm@11.3.0` (see `package.json#packageManager`), and Docker (used by the sandbox's own container and by Speculos, below).
 
+For a real, hand-verifiable run of the full payment path — real agent, real Broker, real Hedera settlement, real HCS audit log — see [`docs/WALKTHROUGH.md`](./docs/WALKTHROUGH.md) instead of the summary below.
+
 ```bash
 pnpm install
 pnpm build
@@ -241,7 +243,6 @@ PayBound is **functionally complete** across all six implementation phases and h
 
 ### What is not yet complete
 
-- **6.2** — End-to-end walkthrough doc
 - **6.3** — Live demo script/recording
 - **6.5** — Final integrated property test pass
 - **6.6** — Submission packaging
@@ -257,7 +258,7 @@ PayBound is **functionally complete** across all six implementation phases and h
 - [x] Sandbox network isolation layer (Docker egress policy, `network-boundary-demo.sh`)
 - [x] Reference agent integration (real LLM via `runSandboxLifecycle`, `apps/sandbox/src/live-run.ts`)
 - [x] End-to-end live path (`pnpm e2e:live`) — task definition → issuance → agent → payment → Hedera settlement + HCS log
-- [ ] End-to-end example and walkthrough doc (in progress — task 6.2)
+- [x] [End-to-end example and walkthrough doc](./docs/WALKTHROUGH.md)
 - [ ] Live demo script / recording (task 6.3)
 
 ## Contributing
