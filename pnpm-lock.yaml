@@ -99,12 +99,12 @@ importers:
       '@hono/node-server':
         specifier: ^2.1.1
         version: 2.1.1(hono@4.13.7)
+      '@paybound/x402-blocky402-client':
+        specifier: workspace:*
+        version: link:../../packages/x402-blocky402-client
       '@x402/core':
         specifier: 2.25.0
         version: 2.25.0
-      '@x402/hedera':
-        specifier: 2.25.0
-        version: 2.25.0(ansi-regex@6.2.2)(ansi-styles@6.2.3)(bn.js@5.2.3)(debug@4.4.1)(protobufjs@8.0.1)(react-native@0.87.1(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0))(strip-ansi@7.1.2)
       hono:
         specifier: ^4.13.7
         version: 4.13.7
@@ -214,6 +214,12 @@ importers:
       '@paybound/capability-spec':
         specifier: workspace:*
         version: link:../capability-spec
+      '@paybound/x402-blocky402-client':
+        specifier: workspace:*
+        version: link:../x402-blocky402-client
+      '@x402/core':
+        specifier: 2.25.0
+        version: 2.25.0
       zod:
         specifier: ^4.5.4
         version: 4.5.4
@@ -223,6 +229,15 @@ importers:
       zod:
         specifier: ^4.5.4
         version: 4.5.4
+
+  packages/x402-blocky402-client:
+    dependencies:
+      '@x402/core':
+        specifier: 2.25.0
+        version: 2.25.0
+      '@x402/hedera':
+        specifier: 2.25.0
+        version: 2.25.0(ansi-regex@6.2.2)(ansi-styles@6.2.3)(bn.js@5.2.3)(debug@4.4.1)(protobufjs@8.0.1)(react-native@0.87.1(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0))(strip-ansi@7.1.2)
 
 packages:
 

@@ -14,8 +14,8 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
+    "@paybound/x402-blocky402-client": "workspace:*",
     "@x402/core": "2.25.0",
-    "@x402/hedera": "2.25.0",
     "hono": "^4.13.7"
   },
   "devDependencies": {
