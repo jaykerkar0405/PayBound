@@ -113,6 +113,18 @@ function stage(n: number, total: number, label: string): void {
   console.log(`\n[${n}/${total}] ${label}`);
 }
 
+/**
+ * Structured, display-only NDJSON events for apps/tui-dashboard — a separate,
+ * best-effort terminal UI that tails this script's stdout to visualize a run
+ * as it happens. Pure logging additions alongside the existing human-readable
+ * console output above/below — nothing in this script reads its own output,
+ * so these lines cannot affect the run itself. See apps/tui-dashboard/README.md
+ * for the event contract.
+ */
+function emitEvent(event: Record<string, unknown>): void {
+  console.log(`PB_TUI_EVENT ${JSON.stringify(event)}`);
+}
+
 function prefixLines(text: string, prefix: string): string {
   return text
     .split("\n")
@@ -290,12 +302,22 @@ async function runAgent(contentUrl: string): Promise<AgentRunResult> {
 interface MirrorTopicMessage {
   readonly message: string;
   readonly consensus_timestamp: string;
+  /** The HCS topic's per-message sequence number, per the mirror node's own Topic Messages API. */
+  readonly sequence_number: number;
 }
 
 async function findSettlementOutcome(
   taskHash: string,
   sinceEpochSeconds: number,
-): Promise<{ hederaTransactionId: string; status: string; consensusTimestamp: string } | undefined> {
+): Promise<
+  | {
+      hederaTransactionId: string;
+      status: string;
+      consensusTimestamp: string;
+      sequenceNumber: number;
+    }
+  | undefined
+> {
   const topicId = requireTopicId();
   const deadline = Date.now() + SETTLEMENT_TIMEOUT_MS;
 
@@ -320,6 +342,7 @@ async function findSettlementOutcome(
             hederaTransactionId: parsed.data.hederaTransactionId,
             status: parsed.data.status,
             consensusTimestamp: m.consensus_timestamp,
+            sequenceNumber: m.sequence_number,
           };
         }
       }
@@ -364,6 +387,7 @@ const TOTAL_STAGES = 6;
 
 async function main(): Promise<void> {
   console.log("=== PayBound — Full Live End-to-End Demo Path (Task 6.1c) ===");
+  emitEvent({ type: "run_started" });
 
   const brokerHost = process.env.BROKER_HOST ?? "127.0.0.1";
   const brokerPort = Number(process.env.BROKER_PORT ?? brokerConfig.port);
@@ -379,10 +403,12 @@ async function main(): Promise<void> {
   const { taskHash } = ensureSeeded();
   console.log(`  Task hash: ${taskHash}`);
   console.log(`  Price per run: ${LIVE_AGENT_RUN_PRICE} HBAR`);
+  emitEvent({ type: "task_seeded", taskHash, price: LIVE_AGENT_RUN_PRICE });
 
   stage(3, TOTAL_STAGES, "Serving untrusted content (legitimate invoice framing + injected redirect attempt)...");
   const { server: contentServer, url: contentUrl } = await startContentServer();
   console.log(`  Untrusted content served at ${contentUrl}`);
+  emitEvent({ type: "content_served", url: contentUrl });
 
   stage(
     4,
@@ -404,6 +430,7 @@ async function main(): Promise<void> {
         "approved. Not a stack trace — see the [sandbox] output above for the last thing it " +
         "logged before the timeout.",
     );
+    emitEvent({ type: "run_error", source: "e2e-live-demo", stage: "agent", message: "agent run timed out" });
     process.exitCode = 1;
     return;
   }
@@ -414,6 +441,12 @@ async function main(): Promise<void> {
         "both Gemini and Groq failed/rate-limited, or the Broker rejected the payment). " +
         `Exit code: ${agentResult.exitCode}`,
     );
+    emitEvent({
+      type: "run_error",
+      source: "e2e-live-demo",
+      stage: "agent",
+      message: `agent run exited with code ${agentResult.exitCode}`,
+    });
     process.exitCode = 1;
     return;
   }
@@ -426,6 +459,7 @@ async function main(): Promise<void> {
   console.log(`  Provider that handled this run: ${provider}`);
   console.log(`  Capability used: ${capabilityId ?? "(not found in output)"}`);
   console.log(`  paid: ${paid}`);
+  emitEvent({ type: "payment_outcome", provider, capabilityId, paid });
 
   if (!paid) {
     console.error(
@@ -433,6 +467,7 @@ async function main(): Promise<void> {
         "output above for why — this can be a legitimate, safe outcome: e.g. the model declined " +
         "to act on the injected content at all). Nothing to settle — stopping here.",
     );
+    emitEvent({ type: "run_error", source: "e2e-live-demo", stage: "pay", message: "no payment was made this run" });
     process.exitCode = 1;
     return;
   }
@@ -442,6 +477,7 @@ async function main(): Promise<void> {
     TOTAL_STAGES,
     `Waiting for Hedera settlement + HCS audit log confirmation (up to ${Math.round(SETTLEMENT_TIMEOUT_MS / 1000)}s, polling the public mirror node)...`,
   );
+  emitEvent({ type: "stage", stage: "settle", status: "active" });
   const outcome = await findSettlementOutcome(taskHash, runStartedAtEpochSeconds);
 
   if (!outcome) {
@@ -452,6 +488,12 @@ async function main(): Promise<void> {
         "re-querying later:\n" +
         `  curl "https://testnet.mirrornode.hedera.com/api/v1/topics/${requireTopicId()}/messages?order=desc&limit=5"`,
     );
+    emitEvent({
+      type: "run_error",
+      source: "e2e-live-demo",
+      stage: "settle",
+      message: "settlement outcome did not appear on the mirror node within the poll window",
+    });
     process.exitCode = 1;
     return;
   }
@@ -459,19 +501,34 @@ async function main(): Promise<void> {
   console.log(`  HCS settlement_outcome event found (consensus timestamp ${outcome.consensusTimestamp}):`);
   console.log(`    status: ${outcome.status}`);
   console.log(`    hederaTransactionId: ${outcome.hederaTransactionId}`);
+  console.log(`    hcsSequenceNumber: ${outcome.sequenceNumber}`);
+  emitEvent({
+    type: "settlement_found",
+    status: outcome.status,
+    hederaTransactionId: outcome.hederaTransactionId,
+    consensusTimestamp: outcome.consensusTimestamp,
+    sequenceNumber: outcome.sequenceNumber,
+  });
+  emitEvent({ type: "stage", stage: "settle", status: "done" });
+  emitEvent({ type: "stage", stage: "hcs", status: "active" });
 
+  let hashscanUrl: string | undefined;
   try {
     const confirmed = await queryHederaMirrorNode(outcome.hederaTransactionId);
     console.log(
       `  Independent mirror-node confirmation of the settlement transaction: ` +
         `outcome=${confirmed.outcome}, status=${confirmed.status}`,
     );
-    console.log(`  View on HashScan: https://hashscan.io/testnet/transaction/${outcome.hederaTransactionId}`);
+    hashscanUrl = `https://hashscan.io/testnet/transaction/${outcome.hederaTransactionId}`;
+    console.log(`  View on HashScan: ${hashscanUrl}`);
+    emitEvent({ type: "mirror_confirmed", outcome: confirmed.outcome, status: confirmed.status, hashscanUrl });
+    emitEvent({ type: "stage", stage: "hcs", status: "done" });
   } catch (err) {
     console.log(
       `  Could not independently reconfirm the transaction via mirror node yet: ` +
         `${err instanceof Error ? err.message : String(err)} (it may still be propagating).`,
     );
+    emitEvent({ type: "stage", stage: "hcs", status: "done" });
   }
 
   console.log(
@@ -480,11 +537,24 @@ async function main(): Promise<void> {
       "payment, Hedera settlement, and HCS audit log confirmation, all independently verified " +
       "via the public mirror node.",
   );
+  emitEvent({
+    type: "final_result",
+    paid: true,
+    provider,
+    capabilityId,
+    hederaTransactionId: outcome.hederaTransactionId,
+    status: outcome.status,
+    hcsSequenceNumber: outcome.sequenceNumber,
+    consensusTimestamp: outcome.consensusTimestamp,
+    hashscanUrl,
+  });
   process.exitCode = 0;
 }
 
 main().catch((err: unknown) => {
-  console.error("\n✗ e2e-live-demo failed:", err instanceof Error ? err.message : err);
+  const message = err instanceof Error ? err.message : String(err);
+  console.error("\n✗ e2e-live-demo failed:", message);
+  emitEvent({ type: "run_error", source: "e2e-live-demo", stage: "unknown", message });
   if (err instanceof Error && err.stack) {
     console.error(err.stack);
   }
