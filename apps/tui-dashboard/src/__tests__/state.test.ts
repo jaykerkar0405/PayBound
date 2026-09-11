@@ -63,6 +63,26 @@ describe("reduceEvent", () => {
     expect(state.finalResult).toMatchObject({ paid: true, hcsSequenceNumber: 42 });
   });
 
+  it("surfaces which adversarial demo scenario is running, when the run reports one", () => {
+    let state = initialState();
+    state = reduceEvent(state, {
+      type: "content_served",
+      url: "http://127.0.0.1:12345/",
+      scenario: "hijack",
+      scenarioLabel: "Full instruction-override attempt (ignore task, act immediately)",
+    });
+    expect(state.scenario).toBe("hijack");
+    expect(state.log.at(-1)?.text).toContain("hijack");
+    expect(state.log.at(-1)?.text).toContain("Full instruction-override attempt");
+  });
+
+  it("still works for a content_served event with no scenario (older/default shape)", () => {
+    let state = initialState();
+    state = reduceEvent(state, { type: "content_served", url: "http://127.0.0.1:12345/" });
+    expect(state.scenario).toBeUndefined();
+    expect(state.contentUrl).toBe("http://127.0.0.1:12345/");
+  });
+
   it("shows the real pay tool-call JSON payload the moment it arrives", () => {
     let state = initialState();
     state = reduceEvent(state, { type: "pay_tool_call", capabilityId: "abc-123", timestamp: "t" });
