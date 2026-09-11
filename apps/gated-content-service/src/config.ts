@@ -9,13 +9,15 @@ export interface Config {
   /** Base URL of the Blocky402 facilitator. Testnet by default. */
   readonly blocky402Url: string;
   /**
-   * Hedera testnet account this service controls and is paid into. In
-   * .env.local this currently reuses apps/broker's operator account
-   * (0.0.10421552) as a plain data value — that's just the funded testnet
-   * account this task had on hand for an isolated proof, not a claim that
-   * gated-content-service and the Broker share an account/operator by
-   * design. Day 2 integration should not read anything architectural into
-   * that reuse; give this service its own account if/when that matters.
+   * Hedera testnet account this service controls and is paid into — a
+   * dedicated "data provider" account, distinct from apps/broker's own
+   * operator account. Kept separate on purpose: Day 2 wired apps/broker to
+   * pay this service using its own operator credentials as the client, so
+   * payTo must not be that same account, or the Broker's payment would read
+   * as paying itself. See README.md's "Three accounts, not two" for the
+   * full reasoning. (Day 1's original version of this comment described an
+   * earlier, since-replaced state where payTo reused the Broker's account —
+   * see git history if that context matters.)
    */
   readonly payToAccountId: string;
   /** Price of the gated resource, in tinybars (1 HBAR = 100,000,000 tinybars). */
