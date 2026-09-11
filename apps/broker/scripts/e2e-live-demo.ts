@@ -73,6 +73,7 @@ import { hcsEventSchema, queryHederaMirrorNode, requireTopicId } from "@paybound
 import { config as brokerConfig } from "../src/config.js";
 import { isSettlementConfigured } from "../src/settlement.js";
 import { ensureSeeded, LIVE_AGENT_RUN_PRICE } from "./seed-live-agent-run.js";
+import { payForGatedContent } from "./pay-for-gated-content.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SANDBOX_DIR = path.resolve(HERE, "../../sandbox");
@@ -467,7 +468,18 @@ function extractLastCapabilityId(output: string): string | undefined {
 
 const TOTAL_STAGES = 6;
 
-async function main(): Promise<void> {
+/**
+ * The original 6-stage adversarial-scenario demo (task 6.1c), unchanged —
+ * every line of logic below is identical to before Hedera-track Day 2; only
+ * the function name and return convention changed (returns an exit code
+ * instead of setting `process.exitCode` directly and returning early), so
+ * `main()` below can run the new, independent x402 purchase stage
+ * afterward regardless of how this one concludes. See that stage's own
+ * comment for why it's deliberately NOT part of this function: it doesn't
+ * touch the sandboxed agent's readContent/pay tool-calling loop this
+ * function exercises, by design.
+ */
+async function runAdversarialScenarioDemo(): Promise<number> {
   console.log("=== PayBound — Full Live End-to-End Demo Path (Task 6.1c) ===");
   emitEvent({ type: "run_started" });
 
@@ -519,8 +531,7 @@ async function main(): Promise<void> {
         "logged before the timeout.",
     );
     emitEvent({ type: "run_error", source: "e2e-live-demo", stage: "agent", message: "agent run timed out" });
-    process.exitCode = 1;
-    return;
+    return 1;
   }
 
   if (agentResult.exitCode !== 0) {
@@ -535,8 +546,7 @@ async function main(): Promise<void> {
       stage: "agent",
       message: `agent run exited with code ${agentResult.exitCode}`,
     });
-    process.exitCode = 1;
-    return;
+    return 1;
   }
 
   const provider = extractProvider(agentResult.output);
@@ -556,8 +566,7 @@ async function main(): Promise<void> {
         "to act on the injected content at all). Nothing to settle — stopping here.",
     );
     emitEvent({ type: "run_error", source: "e2e-live-demo", stage: "pay", message: "no payment was made this run" });
-    process.exitCode = 1;
-    return;
+    return 1;
   }
 
   stage(
@@ -582,8 +591,7 @@ async function main(): Promise<void> {
       stage: "settle",
       message: "settlement outcome did not appear on the mirror node within the poll window",
     });
-    process.exitCode = 1;
-    return;
+    return 1;
   }
 
   console.log(`  HCS settlement_outcome event found (consensus timestamp ${outcome.consensusTimestamp}):`);
@@ -636,7 +644,65 @@ async function main(): Promise<void> {
     consensusTimestamp: outcome.consensusTimestamp,
     hashscanUrl,
   });
-  process.exitCode = 0;
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Real x402-gated content purchase (Hedera track, Day 2) — deliberately
+// independent of runAdversarialScenarioDemo() above: it uses the Broker's
+// own operator credentials to actually consume apps/gated-content-service
+// through packages/settlement's new x402 strategy, NOT the sandboxed
+// agent's readContent/pay tool-calling loop. Runs regardless of that
+// scenario's own outcome (a declined/failed adversarial-scenario payment
+// is not a reason to skip demonstrating this separate, real capability),
+// and its own pass/fail is tracked independently — see main() below.
+// ---------------------------------------------------------------------------
+
+async function runX402PurchaseStage(): Promise<number> {
+  console.log(
+    "\n=== Real x402-gated content purchase (Hedera track Day 2 — independent of the scenario above) ===",
+  );
+  emitEvent({ type: "stage", stage: "x402_purchase", status: "active" });
+
+  try {
+    const result = await payForGatedContent();
+    const hashscanUrl = `https://hashscan.io/testnet/transaction/${result.settlement.transactionId}`;
+    console.log(`  Settlement outcome: ${result.settlement.outcome}`);
+    console.log(`  Hedera transaction ID: ${result.settlement.transactionId}`);
+    console.log(`  View on HashScan: ${hashscanUrl}`);
+
+    const confirmed = await queryHederaMirrorNode(result.settlement.transactionId);
+    console.log(
+      `  Independent mirror-node confirmation: outcome=${confirmed.outcome}, status=${confirmed.status}`,
+    );
+
+    console.log(
+      "\n✓ SUCCESS: real x402-gated content purchase — the Broker itself paid " +
+        "apps/gated-content-service through the live Blocky402 testnet facilitator, " +
+        "independently confirmed on the Hedera mirror node.",
+    );
+    emitEvent({
+      type: "x402_purchase_result",
+      success: true,
+      hederaTransactionId: result.settlement.transactionId,
+      status: confirmed.status,
+      hashscanUrl,
+    });
+    emitEvent({ type: "stage", stage: "x402_purchase", status: "done" });
+    return 0;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`\n✗ Real x402-gated content purchase failed: ${message}`);
+    emitEvent({ type: "run_error", source: "e2e-live-demo", stage: "x402_purchase", message });
+    emitEvent({ type: "stage", stage: "x402_purchase", status: "failed" });
+    return 1;
+  }
+}
+
+async function main(): Promise<void> {
+  const scenarioExitCode = await runAdversarialScenarioDemo();
+  const x402ExitCode = await runX402PurchaseStage();
+  process.exitCode = scenarioExitCode !== 0 ? scenarioExitCode : x402ExitCode;
 }
 
 main().catch((err: unknown) => {
