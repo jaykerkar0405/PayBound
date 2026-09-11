@@ -7,6 +7,11 @@ export {
     type HederaSubmissionResult,
     type HederaReconciliationResult,
 } from "./submit.js";
+export {
+    submitViaX402,
+    createX402Submitter,
+    type X402SubmissionOptions,
+} from "./submit-x402.js";
 
 // HCS audit trail (task 4.2)
 export {
