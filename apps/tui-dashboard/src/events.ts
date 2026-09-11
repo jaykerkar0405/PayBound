@@ -30,7 +30,7 @@ export type StageEventStatus = "active" | "done" | "failed";
 export type PbEvent =
   | { type: "run_started" }
   | { type: "task_seeded"; taskHash: string; price: string }
-  | { type: "content_served"; url: string }
+  | { type: "content_served"; url: string; scenario?: string; scenarioLabel?: string }
   | { type: "stage"; stage: StageId; status: StageEventStatus }
   | { type: "capability_issued"; capabilityId: string }
   | { type: "pay_tool_call"; capabilityId: string; timestamp: string }
