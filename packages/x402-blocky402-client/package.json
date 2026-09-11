@@ -1,21 +1,24 @@
 {
-  "name": "@paybound/settlement",
+  "name": "@paybound/x402-blocky402-client",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.json",
     "check-types": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run"
   },
   "dependencies": {
-    "@hashgraph/sdk": "2.81.0",
-    "@paybound/capability-spec": "workspace:*",
-    "@paybound/x402-blocky402-client": "workspace:*",
     "@x402/core": "2.25.0",
-    "zod": "^4.5.4"
+    "@x402/hedera": "2.25.0"
   }
 }
