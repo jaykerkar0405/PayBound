@@ -38,6 +38,7 @@ export interface DashboardState {
   readonly lastToolCall?: { readonly capabilityId: string; readonly timestamp: string };
   readonly taskHash?: string;
   readonly contentUrl?: string;
+  readonly scenario?: string;
   readonly paid?: boolean;
   readonly finalResult?: FinalResult;
   readonly errorMessage?: string;
@@ -93,8 +94,14 @@ export function reduceEvent(state: DashboardState, event: PbEvent): DashboardSta
         `Task seeded — hash ${short(event.taskHash)}, price ${event.price} HBAR`,
       );
 
-    case "content_served":
-      return pushLog({ ...state, contentUrl: event.url }, `Untrusted content served at ${event.url}`);
+    case "content_served": {
+      const scenarioNote = event.scenarioLabel ? ` — scenario "${event.scenario}": ${event.scenarioLabel}` : "";
+      const withContentUrl = { ...state, contentUrl: event.url };
+      return pushLog(
+        event.scenario ? { ...withContentUrl, scenario: event.scenario } : withContentUrl,
+        `Untrusted content served at ${event.url}${scenarioNote}`,
+      );
+    }
 
     case "stage":
       return pushLog(setStage(state, event.stage, event.status), stageLogText(event.stage, event.status));
