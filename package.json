@@ -15,6 +15,9 @@
     "test": "turbo run test",
     "check-types": "turbo run check-types",
     "e2e:live": "pnpm --filter broker e2e:live",
+    "live:up": "scripts/live-stack.sh up",
+    "live:down": "scripts/live-stack.sh down",
+    "live:status": "scripts/live-stack.sh status",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

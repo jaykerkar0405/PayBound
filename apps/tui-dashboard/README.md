@@ -13,10 +13,21 @@ it crashes, hangs, or is killed outright. See
 
 ## Running it
 
-From `apps/tui-dashboard/`, with the same prerequisites as
-[`docs/WALKTHROUGH.md`](../../docs/WALKTHROUGH.md) Level 1 already met
-(Broker running via `pnpm --filter broker dev:live`, Speculos running,
-`apps/broker/.env.local` and `apps/sandbox/.env.local` configured):
+The dashboard needs the same always-on infra as
+[`docs/WALKTHROUGH.md`](../../docs/WALKTHROUGH.md) Level 1: Speculos and
+the Broker running, `apps/broker/.env.local`/`apps/sandbox/.env.local`
+configured. Bring all of that up with one script from the repo root
+(see [`scripts/live-stack.sh`](../../scripts/live-stack.sh)):
+
+```bash
+pnpm live:up      # starts Speculos + Broker, seeds the task, idempotent
+pnpm live:status  # check what's up
+pnpm live:down    # tear it all down when you're done rehearsing
+```
+
+`live:up` only manages that infra — it does not start `e2e:live` or this
+dashboard, so you can run either as many times as you want against the
+same up-once stack. Then, from `apps/tui-dashboard/`:
 
 ```bash
 pnpm dev
