@@ -93,6 +93,14 @@ export async function executePay(
   request: PayRequest,
   options: PayToolOptions = {},
 ): Promise<PayToolResult> {
+  // Structured, display-only event for apps/tui-dashboard — the exact instant the
+  // agent invokes the pay tool, with the exact (and only) argument it can ever
+  // carry. Pure logging: no effect on the request made below. See that package's
+  // README for the NDJSON event contract this line is part of.
+  console.log(
+    `PB_TUI_EVENT ${JSON.stringify({ type: "pay_tool_call", capabilityId: request.capabilityId, timestamp: new Date().toISOString() })}`,
+  );
+
   const fetchImpl = options.fetch ?? fetch;
 
   const targetUrl = options.brokerUrl ?? `${brokerBaseUrl(config)}/pay`;
