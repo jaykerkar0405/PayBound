@@ -50,6 +50,20 @@ Designed for an **80-100 column terminal**. The layout reads
 80 renders at 80 and will overflow; wider than 100 is capped at 100 rather
 than stretching). Size your terminal into that range *before* hitting record.
 
+### Running a different adversarial scenario
+
+The dashboard spawns `e2e:live` with this process's own environment
+(`runner.ts`), so any of that script's env vars pass straight through —
+including `E2E_DEMO_SCENARIO` (see `docs/WALKTHROUGH.md`'s "Trying a
+different adversarial scenario"):
+
+```bash
+E2E_DEMO_SCENARIO=hijack pnpm dev
+```
+
+The event log (panel 4) shows which scenario is running the moment the
+content server starts, alongside the usual stage/audit events.
+
 ### Replaying a captured run (dev/testing only)
 
 To iterate on the dashboard's rendering without spending a real Gemini/Hedera
