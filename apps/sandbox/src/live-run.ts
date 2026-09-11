@@ -95,6 +95,16 @@ const LIVE_AGENT_RUN_PRICE = process.env.LIVE_RUN_EXACT_AMOUNT ?? "0.00000001";
 const CONTENT_URL = process.env.LIVE_RUN_CONTENT_URL ?? "https://example.com";
 
 /**
+ * Structured, display-only NDJSON events for apps/tui-dashboard. Pure logging
+ * additions alongside the existing human-readable console output below — never
+ * read by, or able to affect, anything in the payment flow itself. See
+ * apps/tui-dashboard/README.md for the event contract.
+ */
+function emitEvent(event: Record<string, unknown>): void {
+  console.log(`PB_TUI_EVENT ${JSON.stringify(event)}`);
+}
+
+/**
  * "scripted" (default): createScriptedDecisionModel — free, deterministic,
  * no real API call. "real": Gemini first, Groq fallback — real tokens,
  * real billing. See this file's top doc comment.
@@ -280,14 +290,25 @@ async function runLifecycleWithModel(
     model,
     contentUrl: CONTENT_URL,
     maxSteps: 5,
-    performHandshake: (attestation) => {
+    performHandshake: async (attestation) => {
       console.log("Performing attestation channel handshake...");
-      return performAttestationHandshake(attestation, { brokerBaseUrl: brokerBase });
+      emitEvent({ type: "stage", stage: "attest", status: "active" });
+      const outcome = await performAttestationHandshake(attestation, { brokerBaseUrl: brokerBase });
+      emitEvent({
+        type: "stage",
+        stage: "attest",
+        status: outcome.status === "rejected" ? "failed" : "done",
+      });
+      return outcome;
     },
     issueCapability: async (session) => {
       console.log(`Requesting capability from Broker for resource ${LIVE_AGENT_RUN_RESOURCE_ID}...`);
+      emitEvent({ type: "stage", stage: "issue", status: "active" });
       const id = await issueCapabilityViaBroker(brokerBase, session);
       console.log(`Capability issued: ${id}`);
+      emitEvent({ type: "capability_issued", capabilityId: id });
+      emitEvent({ type: "stage", stage: "issue", status: "done" });
+      emitEvent({ type: "stage", stage: "agent", status: "active" });
       onCapabilityIssued?.(id);
       return id;
     },
@@ -400,6 +421,7 @@ async function main(): Promise<void> {
   console.log(`readResults: ${JSON.stringify(result.readResults)}`);
   console.log(`paid: ${result.paid}`);
   console.log(`payResults: ${JSON.stringify(result.payResults, null, 2)}`);
+  emitEvent({ type: "payment_result", paid: result.paid, servedBy });
 
   logCostAwareness(result.totalUsage, outcome);
 
@@ -421,9 +443,11 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  console.error("\n✗ live-run failed:", err instanceof Error ? err.message : err);
+  const message = err instanceof Error ? err.message : String(err);
+  console.error("\n✗ live-run failed:", message);
   if (err instanceof Error && err.stack) {
     console.error(err.stack);
   }
+  emitEvent({ type: "run_error", source: "sandbox", message });
   process.exitCode = 1;
 });
