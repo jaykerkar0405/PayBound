@@ -1,0 +1,25 @@
+{
+  "name": "gated-content-service",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "dev:live": "node --env-file=.env.local --import tsx/esm src/index.ts",
+    "test-client": "node --env-file=.env.local --import tsx/esm scripts/test-client.ts",
+    "lint": "eslint .",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "check-types": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@x402/core": "2.25.0",
+    "@x402/hedera": "2.25.0",
+    "hono": "^4.13.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "tsx": "^4.23.13"
+  }
+}
