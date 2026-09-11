@@ -50,6 +50,9 @@ importers:
       '@paybound/settlement':
         specifier: workspace:*
         version: link:../../packages/settlement
+      '@paybound/x402-blocky402-client':
+        specifier: workspace:*
+        version: link:../../packages/x402-blocky402-client
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3

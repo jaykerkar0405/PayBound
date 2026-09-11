@@ -63,6 +63,7 @@ app.get(GATED_PATH, async (c) => {
   const paymentRequirements = paymentPayload.accepted;
 
   const verifyResult = await verifyPayment(paymentPayload, paymentRequirements);
+  console.log(`[blocky402] POST /verify response: ${JSON.stringify(verifyResult)}`);
   if (!verifyResult.isValid) {
     return c.json(
       {
@@ -75,6 +76,7 @@ app.get(GATED_PATH, async (c) => {
   }
 
   const settleResult = await settlePayment(paymentPayload, paymentRequirements);
+  console.log(`[blocky402] POST /settle response: ${JSON.stringify(settleResult)}`);
   if (!settleResult.success) {
     return c.json(
       {
