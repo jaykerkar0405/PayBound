@@ -1,0 +1,219 @@
+PayBound spend-cap Confidential Workflow — CRE simulation evidence
+Issue #98 (5.3)
+
+Environment:
+  CRE CLI version: v1.33.0 (`cre version`)
+  Account: chaitanyakelkar94@gmail.com (`cre whoami`), Deploy Access: Not enabled
+  Command run from: cre-workflow/ (project root, where project.yaml lives)
+  Target: staging-settings
+  .env: copied verbatim from .env.example (SPEND_CAPS_JSON with
+    api-call-gpt4: 0.50, api-call-claude: 1.00, default: 0.25) for all
+    cases except FALLBACK-PERMISSIVE, noted below.
+
+Trigger-index confirmation:
+  `--trigger-index 5` (deliberately out of range) returned:
+    "✗ invalid --trigger-index 5; available range: 0-0"
+  confirming index 0 is the only (and correct) registered trigger.
+
+===============================================================================
+CASE: ALLOW — under the api-call-gpt4 cap (0.50)
+Command:
+  cre workflow simulate spend-cap-workflow --non-interactive --trigger-index 0 \
+    --http-payload '{"resourceId": "api-call-gpt4", "exactAmount": "0.30"}' \
+    --target staging-settings
+===============================================================================
+Initializing...
+Loading settings...
+! Using default private key for chain write simulation. To use your own key, set CRE_ETH_PRIVATE_KEY in your .env file or system environment.
+Checking RPC connectivity...
+! Some RPCs in settings are not functioning properly, please check: RPC health check failed:
+[ethereum-testnet-sepolia] failed RPC health check: Post "http://localhost:8545": dial tcp [::1]:8545: connectex: No connection could be made because the target machine actively refused it.
+Compiling workflow...
+✓ Workflow compiled
+✓ Simulation limits enabled
+  HTTP: req=120kb resp=250kb timeout=10s | ConfHTTP: req=125kb resp=500kb timeout=1m30s | Consensus obs=25kb | ChainWrite evm_report=50kb evm_gas=10000000 solana_report=265b solana_cu=300000 | WASM binary=100mb compressed=20mb
+  Binary hash: 0c57ec5cc80547641b426c91b911327720c05625f69a6ff2e2fa30ea48a6efa6
+  Config hash: ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356
+✓ Parsed JSON input successfully
+✓ Created HTTP trigger payload with 2 fields
+2026-09-12T13:10:04Z [SIMULATION] Simulator Initialized
+
+2026-09-12T13:10:04Z [SIMULATION] Running trigger trigger=http-trigger@1.0.0-alpha
+╭────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Handler requested TEE Execution                                                                    │
+│ The simulator is not a real TEE, and is meant to debug.                                            │
+│ Do not use it for sensitive information.                                                           │
+│ During real execution, user logs for this trigger will not be visible, and will not leave the TEE. │
+│ They are presented in the simulator for debugging only.                                            │
+│                                                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+2026-09-12T13:10:05Z [USER LOG] Spend check: resource=api-call-gpt4 amount=0.3 cap=0.5 → ALLOW
+
+✓ Workflow Simulation Result:
+"{\"allowed\":true,\"reason\":\"CRE policy: allowed\"}"
+
+2026-09-12T13:10:05Z [SIMULATION] Execution finished signal received
+2026-09-12T13:10:05Z [SIMULATION] Skipping WorkflowEngineV2
+
+╭──────────────────────────────────────────────────────╮
+│ Simulation complete! Ready to deploy your workflow?  │
+│                                                      │
+│ Run cre account access to request deployment access. │
+╰──────────────────────────────────────────────────────╯
+
+RESULT: { "allowed": true, "reason": "CRE policy: allowed" } — MATCHES EXPECTED.
+
+===============================================================================
+CASE: DENY — over the api-call-gpt4 cap
+Command:
+  cre workflow simulate spend-cap-workflow --non-interactive --trigger-index 0 \
+    --http-payload '{"resourceId": "api-call-gpt4", "exactAmount": "5.00"}' \
+    --target staging-settings
+===============================================================================
+Initializing...
+Loading settings...
+! Using default private key for chain write simulation. To use your own key, set CRE_ETH_PRIVATE_KEY in your .env file or system environment.
+Checking RPC connectivity...
+! Some RPCs in settings are not functioning properly, please check: RPC health check failed:
+[ethereum-testnet-sepolia] failed RPC health check: Post "http://localhost:8545": dial tcp [::1]:8545: connectex: No connection could be made because the target machine actively refused it.
+Compiling workflow...
+✓ Workflow compiled
+✓ Simulation limits enabled
+  HTTP: req=120kb resp=250kb timeout=10s | ConfHTTP: req=125kb resp=500kb timeout=1m30s | Consensus obs=25kb | ChainWrite evm_report=50kb evm_gas=10000000 solana_report=265b solana_cu=300000 | WASM binary=100mb compressed=20mb
+  Binary hash: 0c57ec5cc80547641b426c91b911327720c05625f69a6ff2e2fa30ea48a6efa6
+  Config hash: ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356
+✓ Parsed JSON input successfully
+✓ Created HTTP trigger payload with 2 fields
+2026-09-12T13:10:27Z [SIMULATION] Simulator Initialized
+
+2026-09-12T13:10:27Z [SIMULATION] Running trigger trigger=http-trigger@1.0.0-alpha
+╭────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Handler requested TEE Execution                                                                    │
+│ The simulator is not a real TEE, and is meant to debug.                                            │
+│ Do not use it for sensitive information.                                                           │
+│ During real execution, user logs for this trigger will not be visible, and will not leave the TEE. │
+│ They are presented in the simulator for debugging only.                                            │
+│                                                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+2026-09-12T13:10:28Z [USER LOG] Spend check: resource=api-call-gpt4 amount=5 cap=0.5 → DENY
+
+✓ Workflow Simulation Result:
+"{\"allowed\":false,\"reason\":\"CRE policy: spend cap exceeded (requested 5.00, cap 0.50)\"}"
+
+2026-09-12T13:10:28Z [SIMULATION] Execution finished signal received
+2026-09-12T13:10:28Z [SIMULATION] Skipping WorkflowEngineV2
+
+╭──────────────────────────────────────────────────────╮
+│ Simulation complete! Ready to deploy your workflow?  │
+│                                                      │
+│ Run cre account access to request deployment access. │
+╰──────────────────────────────────────────────────────╯
+
+RESULT: { "allowed": false, "reason": "CRE policy: spend cap exceeded (requested 5.00, cap 0.50)" } — MATCHES EXPECTED.
+
+===============================================================================
+CASE: FALLBACK-DEFAULT — resourceId not in table, falls to "default" cap (0.25)
+Command:
+  cre workflow simulate spend-cap-workflow --non-interactive --trigger-index 0 \
+    --http-payload '{"resourceId": "totally-unknown-resource", "exactAmount": "0.30"}' \
+    --target staging-settings
+===============================================================================
+Initializing...
+Loading settings...
+! Using default private key for chain write simulation. To use your own key, set CRE_ETH_PRIVATE_KEY in your .env file or system environment.
+Checking RPC connectivity...
+! Some RPCs in settings are not functioning properly, please check: RPC health check failed:
+[ethereum-testnet-sepolia] failed RPC health check: Post "http://localhost:8545": dial tcp [::1]:8545: connectex: No connection could be made because the target machine actively refused it.
+Compiling workflow...
+✓ Workflow compiled
+✓ Simulation limits enabled
+  HTTP: req=120kb resp=250kb timeout=10s | ConfHTTP: req=125kb resp=500kb timeout=1m30s | Consensus obs=25kb | ChainWrite evm_report=50kb evm_gas=10000000 solana_report=265b solana_cu=300000 | WASM binary=100mb compressed=20mb
+  Binary hash: 0c57ec5cc80547641b426c91b911327720c05625f69a6ff2e2fa30ea48a6efa6
+  Config hash: ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356
+✓ Parsed JSON input successfully
+✓ Created HTTP trigger payload with 2 fields
+2026-09-12T13:11:24Z [SIMULATION] Simulator Initialized
+
+2026-09-12T13:11:24Z [SIMULATION] Running trigger trigger=http-trigger@1.0.0-alpha
+╭────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Handler requested TEE Execution                                                                    │
+│ The simulator is not a real TEE, and is meant to debug.                                            │
+│ Do not use it for sensitive information.                                                           │
+│ During real execution, user logs for this trigger will not be visible, and will not leave the TEE. │
+│ They are presented in the simulator for debugging only.                                            │
+│                                                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+2026-09-12T13:11:24Z [USER LOG] Spend check: resource=totally-unknown-resource amount=0.3 cap=0.25 → DENY
+
+✓ Workflow Simulation Result:
+"{\"allowed\":false,\"reason\":\"CRE policy: spend cap exceeded (requested 0.30, cap 0.25)\"}"
+
+2026-09-12T13:11:24Z [SIMULATION] Execution finished signal received
+2026-09-12T13:11:24Z [SIMULATION] Skipping WorkflowEngineV2
+
+╭──────────────────────────────────────────────────────╮
+│ Simulation complete! Ready to deploy your workflow?  │
+│                                                      │
+│ Run cre account access to request deployment access. │
+╰──────────────────────────────────────────────────────╯
+
+RESULT: { "allowed": false, "reason": "CRE policy: spend cap exceeded (requested 0.30, cap 0.25)" } — MATCHES EXPECTED
+  (falls back to the "default" cap of 0.25, then denies since 0.30 > 0.25).
+
+===============================================================================
+CASE: FALLBACK-PERMISSIVE — neither resourceId nor "default" exists in the table
+NOTE: this run used a temporarily modified local .env with the "default" key
+removed entirely, for demonstration purposes only:
+  SPEND_CAPS_JSON='{"api-call-gpt4": "0.50", "api-call-claude": "1.00"}'
+.env was restored to .env.example's original content (including "default":
+"0.25") immediately after this run.
+Command:
+  cre workflow simulate spend-cap-workflow --non-interactive --trigger-index 0 \
+    --http-payload '{"resourceId": "totally-unknown-resource", "exactAmount": "999.00"}' \
+    --target staging-settings
+===============================================================================
+Initializing...
+Loading settings...
+! Using default private key for chain write simulation. To use your own key, set CRE_ETH_PRIVATE_KEY in your .env file or system environment.
+Checking RPC connectivity...
+! Some RPCs in settings are not functioning properly, please check: RPC health check failed:
+[ethereum-testnet-sepolia] failed RPC health check: Post "http://localhost:8545": dial tcp [::1]:8545: connectex: No connection could be made because the target machine actively refused it.
+Compiling workflow...
+✓ Workflow compiled
+✓ Simulation limits enabled
+  HTTP: req=120kb resp=250kb timeout=10s | ConfHTTP: req=125kb resp=500kb timeout=1m30s | Consensus obs=25kb | ChainWrite evm_report=50kb evm_gas=10000000 solana_report=265b solana_cu=300000 | WASM binary=100mb compressed=20mb
+  Binary hash: 0c57ec5cc80547641b426c91b911327720c05625f69a6ff2e2fa30ea48a6efa6
+  Config hash: ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356
+✓ Parsed JSON input successfully
+✓ Created HTTP trigger payload with 2 fields
+2026-09-12T13:12:15Z [SIMULATION] Simulator Initialized
+
+2026-09-12T13:12:15Z [SIMULATION] Running trigger trigger=http-trigger@1.0.0-alpha
+╭────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Handler requested TEE Execution                                                                    │
+│ The simulator is not a real TEE, and is meant to debug.                                            │
+│ Do not use it for sensitive information.                                                           │
+│ During real execution, user logs for this trigger will not be visible, and will not leave the TEE. │
+│ They are presented in the simulator for debugging only.                                            │
+│                                                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+✓ Workflow Simulation Result:
+"{\"allowed\":true,\"reason\":\"No spend cap defined for resource\"}"
+
+2026-09-12T13:12:15Z [SIMULATION] Execution finished signal received
+2026-09-12T13:12:15Z [SIMULATION] Skipping WorkflowEngineV2
+
+╭──────────────────────────────────────────────────────╮
+│ Simulation complete! Ready to deploy your workflow?  │
+│                                                      │
+│ Run cre account access to request deployment access. │
+╰──────────────────────────────────────────────────────╯
+
+RESULT: { "allowed": true, "reason": "No spend cap defined for resource" } — MATCHES EXPECTED.
+  (No [USER LOG] line here — correct: this code path returns before the
+  runtime.log() call, since there is no cap to log a comparison against.)

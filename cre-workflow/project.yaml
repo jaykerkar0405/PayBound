@@ -1,0 +1,10 @@
+# ==========================================================================
+# CRE PROJECT SETTINGS FILE
+# ==========================================================================
+# This workflow does not read from or write to a chain. The RPC entry below
+# is a placeholder only (no real endpoint or key) — the `cre` CLI requires at
+# least one recognized chain entry to load project settings.
+staging-settings:
+  rpcs:
+    - chain-name: ethereum-testnet-sepolia
+      url: "http://localhost:8545"
