@@ -26,6 +26,7 @@ import {
   persistHederaTxId,
   getRecoverableSubmissions,
   resolveRecoverableByNonce,
+  markProvisionallyRecoverable,
 } from "./state-machine.js";
 
 export interface SettlementDeps {
@@ -89,6 +90,12 @@ export async function settleAndRecord(
   deps: SettlementDeps = defaultDeps,
 ): Promise<void> {
   if (!isSettlementConfigured()) return;
+
+  // Crash-recovery gap fix: mark this payment provisionally RECOVERABLE
+  // BEFORE attempting dispatch below, not after — see
+  // markProvisionallyRecoverable()'s doc comment in state-machine.ts for
+  // the full reasoning and why this doesn't introduce a new race.
+  markProvisionallyRecoverable(submitted.capability.nonce);
 
   let outcome: SubmissionOutcome;
   let transactionId: string | undefined;

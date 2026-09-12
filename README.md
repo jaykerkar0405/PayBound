@@ -441,6 +441,25 @@ PayBound is **functionally complete** across all six implementation phases and h
 - **6.6** — Submission packaging
 - **3.1** — Real Ledger hardware (Speculos emulator used throughout)
 
+### Known limitations (disclosed, not blocking submission)
+
+- **Crash during Ledger signing itself leaves no recoverable record.** The
+  `SUBMITTED → SETTLED/FAILED/RECOVERABLE` reconciliation path (Phase 4)
+  correctly recovers a broker crash that happens *after* a payment reaches
+  `SUBMITTED` — including a crash between a successful settlement dispatch
+  and the outcome being durably recorded, which the startup sweep now
+  detects and reconciles by transaction ID. The one gap this doesn't close:
+  a crash *during* the Ledger signature itself, before the `SUBMITTED` row
+  is ever written, leaves no database trace at all — the capability's
+  nonce is burned (so it can never be retried) and its share of the task
+  budget is spent, for a payment that never got far enough to have
+  anything to reconcile. Closing this would require a schema/sequencing
+  change (a pre-signing placeholder row with a nullable signature column)
+  beyond what's safe to land under submission deadline pressure against
+  core payment-state logic — treated as a disclosed, architecture-level
+  caveat rather than a blocking defect, same as the Ledger signing-model
+  and x402-integration caveats above.
+
 ## Roadmap
 
 - [x] `SECURITY_INVARIANT.md`: formal statement of the invariant
