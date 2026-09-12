@@ -69,9 +69,18 @@ export const config: Config = {
  * Shared by every caller that needs to reach the Broker directly (tools/pay.ts,
  * live-run.ts's capability issuance + health check, attest-handshake.ts's caller)
  * so the http(s):// prefixing rule lives in exactly one place.
+ *
+ * When `brokerHost` already carries a protocol (e.g. a real deployed broker's
+ * `https://your-broker.onrender.com`), it is treated as a complete origin and
+ * used as-is — `brokerPort` is NOT appended. A hosted HTTPS/HTTP endpoint's
+ * port (443/80) is implicit; appending a port (e.g. the default 3000) would
+ * produce a URL nothing is listening on. A caller that genuinely needs a
+ * non-standard port on a protocol-qualified host can just include it in
+ * `BROKER_HOST` directly (e.g. "https://example.com:8443"). Only a bare
+ * hostname (no protocol) still gets `http://` + the separate port appended,
+ * matching every existing local/Docker use (e.g. "host.docker.internal").
  */
 export function brokerBaseUrl(cfg: Config = config): string {
-  return cfg.brokerHost.startsWith("http://") || cfg.brokerHost.startsWith("https://")
-    ? `${cfg.brokerHost}:${cfg.brokerPort}`
-    : `http://${cfg.brokerHost}:${cfg.brokerPort}`;
+  const hasProtocol = cfg.brokerHost.startsWith("http://") || cfg.brokerHost.startsWith("https://");
+  return hasProtocol ? cfg.brokerHost : `http://${cfg.brokerHost}:${cfg.brokerPort}`;
 }
