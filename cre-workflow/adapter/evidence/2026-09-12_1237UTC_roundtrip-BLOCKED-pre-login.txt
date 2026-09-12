@@ -1,0 +1,28 @@
+=== CASE 1: ALLOW (api-call-gpt4, 0.30 — under the 0.50 cap) ===
+
+--- REQUEST ---
+POST http://127.0.0.1:8090
+Content-Type: application/json
+{"resourceId":"api-call-gpt4","exactAmount":"0.30"}
+
+--- RESPONSE ---
+HTTP 502
+{"error":"cre_cli_failed","message":"Command failed: cre workflow simulate spend-cap-workflow --non-interactive --trigger-index 0 --http-payload {\"resourceId\":\"api-call-gpt4\",\"exactAmount\":\"0.30\"} --target staging-settings\nInitializing...\n! You are not logged in\n✗ Authentication required: not logged in and no CRE_API_KEY set\n  → Run 'cre login' interactively, or\n  → Set CRE_API_KEY environment variable for non-interactive use\n✗ authentication required: no credentials found: you are not logged in, run cre login and try again\n","durationMs":385,"stdout":"\n\n","stderr":"Initializing...\n! You are not logged in\n✗ Authentication required: not logged in and no CRE_API_KEY set\n  → Run 'cre login' interactively, or\n  → Set CRE_API_KEY environment variable for non-interactive use\n✗ authentication required: no credentials found: you are not logged in, run cre login and try again\n"}
+
+--- checkSpendPolicy() OUTCOME ---
+(cre-policy.ts L98-103: non-2xx -> fail-open) { allowed: true, reason: "CRE gateway error: HTTP 502" }
+
+
+=== CASE 2: DENY (api-call-gpt4, 5.00 — over the 0.50 cap) ===
+
+--- REQUEST ---
+POST http://127.0.0.1:8090
+Content-Type: application/json
+{"resourceId":"api-call-gpt4","exactAmount":"5.00"}
+
+--- RESPONSE ---
+HTTP 502
+{"error":"cre_cli_failed","message":"Command failed: cre workflow simulate spend-cap-workflow --non-interactive --trigger-index 0 --http-payload {\"resourceId\":\"api-call-gpt4\",\"exactAmount\":\"5.00\"} --target staging-settings\nInitializing...\n! You are not logged in\n✗ Authentication required: not logged in and no CRE_API_KEY set\n  → Run 'cre login' interactively, or\n  → Set CRE_API_KEY environment variable for non-interactive use\n✗ authentication required: no credentials found: you are not logged in, run cre login and try again\n","durationMs":640,"stdout":"\n\n","stderr":"Initializing...\n! You are not logged in\n✗ Authentication required: not logged in and no CRE_API_KEY set\n  → Run 'cre login' interactively, or\n  → Set CRE_API_KEY environment variable for non-interactive use\n✗ authentication required: no credentials found: you are not logged in, run cre login and try again\n"}
+
+--- checkSpendPolicy() OUTCOME ---
+(cre-policy.ts L98-103: non-2xx -> fail-open) { allowed: true, reason: "CRE gateway error: HTTP 502" }

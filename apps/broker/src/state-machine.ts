@@ -163,6 +163,54 @@ export function resolveRecoverableByNonce(
   updateSubmissionStatusStatement.run(outcome === "settled" ? "SETTLED" : "FAILED", nonce);
 }
 
+/**
+ * Crash-recovery gap fix: writes a provisional `RECOVERABLE` status onto a
+ * just-submitted payment's row, called by settlement.ts's `settleAndRecord`
+ * BEFORE it attempts the real settlement dispatch — not after. Without
+ * this, a broker crash any time between `submitPayment` inserting this row
+ * (status starts `NULL`) and `resolveSubmission` below writing the real
+ * final status leaves that row at `status = NULL` forever. `NULL` is not
+ * the string `'RECOVERABLE'`, so `getRecoverableSubmissions()`'s own query
+ * (`WHERE status = 'RECOVERABLE'`) can never find it on any future startup
+ * sweep — even in the case where a real Hedera transaction ID was already
+ * persisted via `persistHederaTxId()` moments before the crash, and a real
+ * transaction genuinely exists to reconcile against. This was confirmed
+ * empirically: killing the broker process 3 seconds after a real `/pay`
+ * call (after signing completed, before the settlement continuation ran)
+ * leaves exactly this row shape, permanently invisible to reconciliation.
+ *
+ * Why this is safe and doesn't introduce a new race:
+ * - In the normal (non-crash) path, `resolveSubmission` always runs
+ *   synchronously afterward, in the same single-threaded execution as this
+ *   call — it unconditionally overwrites this provisional value with the
+ *   real final status (`SETTLED`/`FAILED`/`RECOVERABLE`) before
+ *   `settleAndRecord` returns. There is no window in which a caller can
+ *   observe this provisional value as if it were final.
+ * - If the process crashes AFTER a payment actually settles but BEFORE
+ *   `resolveSubmission`'s write lands, the row is left showing
+ *   `RECOVERABLE` even though the payment succeeded. This is not a new
+ *   problem — it is exactly the scenario `sweepRecoverablePayments`
+ *   already exists to correctly resolve on the next startup, by querying
+ *   Hedera directly by the persisted transaction ID rather than trusting
+ *   the DB's last-known status.
+ * - Only ever called once `isSettlementConfigured()` has already returned
+ *   true (see settlement.ts) — a payment where Hedera isn't configured at
+ *   all must keep its `NULL` status, its intentional, permanent "stays at
+ *   SUBMITTED" terminal state (docs/SETTLEMENT_INTEGRATION_PROPOSAL.md
+ *   "Design A"), rather than being marked RECOVERABLE for a settlement
+ *   attempt that was never going to be made.
+ * - A crash before ANY dispatch was ever attempted (no transaction ID
+ *   exists yet) still leaves `hedera_transaction_id` NULL on this row,
+ *   which `getRecoverableSubmissions()` correctly continues to exclude —
+ *   there is nothing to reconcile against without a transaction ID. That
+ *   narrower case (also: a crash during Ledger signing itself, before this
+ *   row exists at all) is not fixed by this change; see the audit's Fix 3
+ *   report for why that residual gap is out of this fix's scope.
+ */
+export function markProvisionallyRecoverable(nonce: string): void {
+  updateSubmissionStatusStatement.run("RECOVERABLE", nonce);
+}
+
 // ---------------------------------------------------------------------------
 // RESERVED
 // ---------------------------------------------------------------------------

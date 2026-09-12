@@ -186,6 +186,69 @@ describe("reduceEvent", () => {
     expect(state.log.some((l) => l.text.includes("seq=7"))).toBe(true);
   });
 
+  it("does not let a later, unrelated x402 success mask an earlier scenario failure (the audit's finding)", () => {
+    let state = initialState();
+
+    // The security-relevant agent scenario fails (e.g. the agent timed out,
+    // declined to pay, or settlement never confirmed) — stage is NOT
+    // "x402_purchase", so this belongs to the scenario track.
+    state = reduceEvent(state, {
+      type: "run_error",
+      source: "e2e-live-demo",
+      stage: "agent",
+      message: "agent run timed out",
+    });
+    expect(state.phase).toBe("failed");
+    expect(state.errorMessage).toBe("agent run timed out");
+    expect(state.finalResult).toBeUndefined();
+
+    // scripts/e2e-live-demo.ts always runs the x402 leg next regardless of
+    // the scenario's own outcome, and here it succeeds.
+    state = reduceEvent(state, {
+      type: "x402_purchase_result",
+      success: true,
+      hederaTransactionId: "0.0.7162784@1789999999.000000000",
+      status: "SUCCESS",
+      hashscanUrl: "https://hashscan.io/testnet/transaction/0.0.7162784@1789999999.000000000",
+    });
+
+    // The overall run must still read as failed — the earlier
+    // security-relevant failure is not masked by the later, unrelated
+    // success.
+    expect(state.phase).toBe("failed");
+    expect(state.errorMessage).toBe("agent run timed out");
+    expect(state.finalResult).toBeUndefined();
+
+    // But nothing is lost: both tracks' real outcomes remain independently
+    // inspectable (ResultPanel uses this to show the combined context).
+    expect(state.scenarioOutcome).toEqual({ status: "failed", errorMessage: "agent run timed out" });
+    expect(state.x402Outcome?.status).toBe("succeeded");
+    expect(state.x402Outcome?.result?.hederaTransactionId).toBe("0.0.7162784@1789999999.000000000");
+  });
+
+  it("still reports failure when the x402 leg fails too, after an already-failed scenario", () => {
+    let state = initialState();
+    state = reduceEvent(state, {
+      type: "run_error",
+      source: "e2e-live-demo",
+      stage: "pay",
+      message: "no payment was made this run",
+    });
+    state = reduceEvent(state, {
+      type: "run_error",
+      source: "e2e-live-demo",
+      stage: "x402_purchase",
+      message: "x402 gateway unreachable",
+    });
+
+    expect(state.phase).toBe("failed");
+    // The scenario's own failure is the one surfaced as the headline reason
+    // — checked first, deterministically, regardless of arrival order.
+    expect(state.errorMessage).toBe("no payment was made this run");
+    expect(state.scenarioOutcome?.status).toBe("failed");
+    expect(state.x402Outcome?.status).toBe("failed");
+  });
+
   it("marks a failed run without a final result as a distinct error state", () => {
     let state = initialState();
     state = reduceEvent(state, { type: "run_error", source: "e2e-live-demo", message: "Broker unreachable" });

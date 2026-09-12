@@ -25,6 +25,24 @@ export interface FinalResult {
   readonly hashscanUrl?: string;
 }
 
+/**
+ * The independent outcome of one of the two stages `scripts/e2e-live-demo.ts`
+ * runs — the security-relevant adversarial agent scenario ("scenario"), and
+ * the separate, credentials-based x402 gated-content purchase ("x402"),
+ * which `main()` in that script always runs *after* the scenario stage
+ * regardless of whether the scenario itself succeeded or failed.
+ *
+ * Tracked independently (rather than folded into one overwritable
+ * `finalResult`) so that a real failure in one stage can never be visually
+ * masked by a later, unrelated success in the other — see
+ * `deriveOverallOutcome`'s doc comment below for the actual fix.
+ */
+export interface TrackOutcome {
+  readonly status: "succeeded" | "failed";
+  readonly result?: FinalResult;
+  readonly errorMessage?: string;
+}
+
 export interface LogLine {
   readonly id: number;
   readonly text: string;
@@ -44,6 +62,10 @@ export interface DashboardState {
   readonly finalResult?: FinalResult;
   readonly errorMessage?: string;
   readonly log: readonly LogLine[];
+  /** Independent outcome of the security-relevant agent scenario stage — see `TrackOutcome`. */
+  readonly scenarioOutcome?: TrackOutcome;
+  /** Independent outcome of the separate x402 gated-content purchase stage — see `TrackOutcome`. */
+  readonly x402Outcome?: TrackOutcome;
 }
 
 const MAX_LOG_LINES = 10;
@@ -68,6 +90,99 @@ function setStage(state: DashboardState, stage: StageId, status: StageStatus): D
 
 function short(id: string): string {
   return id.length > 12 ? `${id.slice(0, 8)}…` : id;
+}
+
+/**
+ * Combines the two independent track outcomes into one overall
+ * phase/result — the actual fix for the audit's finding that the Result
+ * panel was overwritten by whichever of the two stages finished last.
+ *
+ * Failure is checked FIRST and unconditionally, regardless of which track
+ * failed or what the other track's status is: if either has failed, the
+ * overall run is "failed", full stop. Since `scripts/e2e-live-demo.ts`
+ * always runs the x402 stage after the scenario stage regardless of the
+ * scenario's own outcome, without this a scenario failure could be
+ * (and, per the audit, was) visually overwritten by the x402 leg
+ * succeeding moments later. This function is pure and re-derives the
+ * overall outcome from both track states on every call, so the order
+ * events actually arrive in cannot matter — the property this needs is
+ * exactly that ordering-independence, not "process failures before
+ * successes."
+ *
+ * Once either track has failed, no combination of the other track's status
+ * changes the derived phase back to "succeeded" — a previously-failed
+ * track's outcome is carried forward unchanged by every caller (see
+ * `applyTrackOutcome`), so "failed" is effectively sticky for the
+ * remainder of the run.
+ */
+type OverallOutcome =
+  | { readonly phase: "running" }
+  | { readonly phase: "failed"; readonly errorMessage?: string }
+  | { readonly phase: "succeeded"; readonly result?: FinalResult };
+
+function deriveOverallOutcome(
+  scenarioOutcome: TrackOutcome | undefined,
+  x402Outcome: TrackOutcome | undefined,
+): OverallOutcome {
+  if (scenarioOutcome?.status === "failed") {
+    return scenarioOutcome.errorMessage !== undefined
+      ? { phase: "failed", errorMessage: scenarioOutcome.errorMessage }
+      : { phase: "failed" };
+  }
+  if (x402Outcome?.status === "failed") {
+    return x402Outcome.errorMessage !== undefined
+      ? { phase: "failed", errorMessage: x402Outcome.errorMessage }
+      : { phase: "failed" };
+  }
+  // Neither has failed. The x402 leg's result is the more "final" one to
+  // show once present (it always runs last in the real script) — prefer
+  // it over the scenario's own result when both have succeeded.
+  if (x402Outcome?.status === "succeeded") {
+    return x402Outcome.result !== undefined ? { phase: "succeeded", result: x402Outcome.result } : { phase: "succeeded" };
+  }
+  if (scenarioOutcome?.status === "succeeded") {
+    return scenarioOutcome.result !== undefined
+      ? { phase: "succeeded", result: scenarioOutcome.result }
+      : { phase: "succeeded" };
+  }
+  return { phase: "running" };
+}
+
+/** Records one track's outcome and recomputes the overall phase/result/errorMessage from both tracks — see `deriveOverallOutcome`. */
+function applyTrackOutcome(
+  state: DashboardState,
+  track: "scenario" | "x402",
+  outcome: TrackOutcome,
+): DashboardState {
+  const scenarioOutcome = track === "scenario" ? outcome : state.scenarioOutcome;
+  const x402Outcome = track === "x402" ? outcome : state.x402Outcome;
+
+  // exactOptionalPropertyTypes forbids assigning a possibly-undefined value
+  // to an optional key — build the object with each optional key added
+  // only when actually defined, same pattern the rest of this file already
+  // uses (e.g. the content_served case above).
+  const withScenario = scenarioOutcome !== undefined ? { ...state, scenarioOutcome } : state;
+  const withOutcomes = x402Outcome !== undefined ? { ...withScenario, x402Outcome } : withScenario;
+
+  const derived = deriveOverallOutcome(scenarioOutcome, x402Outcome);
+
+  if (derived.phase === "running") {
+    return withOutcomes;
+  }
+  if (derived.phase === "failed") {
+    // Omitting finalResult entirely (rather than setting it to undefined)
+    // lets ResultPanel fall through to its "failed" branch instead of
+    // rendering a stale success — matching the original
+    // run_error-overrides-success behavior, now derived from both tracks
+    // instead of a single last-write-wins field.
+    const { finalResult: _droppedFinalResult, ...rest } = withOutcomes;
+    return derived.errorMessage !== undefined
+      ? { ...rest, phase: "failed", errorMessage: derived.errorMessage }
+      : { ...rest, phase: "failed" };
+  }
+  return derived.result !== undefined
+    ? { ...withOutcomes, phase: "succeeded", finalResult: derived.result }
+    : { ...withOutcomes, phase: "succeeded" };
 }
 
 function stageLogText(stage: StageId, status: StageStatus): string {
@@ -139,20 +254,21 @@ export function reduceEvent(state: DashboardState, event: PbEvent): DashboardSta
 
     case "final_result":
       return pushLog(
-        { ...state, phase: "succeeded", finalResult: { ...event } },
+        applyTrackOutcome(state, "scenario", { status: "succeeded", result: { ...event } }),
         `FINAL: paid=${event.paid} tx=${event.hederaTransactionId} seq=${event.hcsSequenceNumber}`,
       );
 
     case "run_error": {
-      // A later run_error must override an earlier latched success — e.g. the
-      // x402 purchase stage failing after the original attest->hcs scenario
-      // already reported a final_result. Omitting finalResult here (rather
-      // than setting it to undefined — exactOptionalPropertyTypes forbids
-      // that) lets ResultPanel fall through to its "Run did not complete"
-      // branch instead of silently keeping the stale success on screen.
-      const { finalResult: _droppedFinalResult, ...rest } = state;
+      // Routes to whichever of the two independent stages this error
+      // actually belongs to — e2e-live-demo.ts tags the x402 leg's own
+      // failures with stage: "x402_purchase"; every other stage value
+      // (including "agent"/"pay"/"settle" and the top-level "unknown"
+      // catch-all) belongs to the security-relevant scenario stage. See
+      // applyTrackOutcome/deriveOverallOutcome for why this can no longer
+      // be masked by a later, unrelated success on the other track.
+      const track = event.stage === "x402_purchase" ? "x402" : "scenario";
       return pushLog(
-        { ...rest, phase: "failed", errorMessage: event.message },
+        applyTrackOutcome(state, track, { status: "failed", errorMessage: event.message }),
         `ERROR (${event.source}): ${event.message}`,
       );
     }
@@ -165,8 +281,11 @@ export function reduceEvent(state: DashboardState, event: PbEvent): DashboardSta
         status: event.status,
         hashscanUrl: event.hashscanUrl,
       };
+      const outcome: TrackOutcome = event.success
+        ? { status: "succeeded", result }
+        : { status: "failed", result, errorMessage: `x402 purchase failed (status ${event.status})` };
       return pushLog(
-        { ...state, phase: event.success ? "succeeded" : state.phase, finalResult: result },
+        applyTrackOutcome(state, "x402", outcome),
         `X402 PURCHASE: paid=${event.success} tx=${event.hederaTransactionId} status=${event.status}`,
       );
     }

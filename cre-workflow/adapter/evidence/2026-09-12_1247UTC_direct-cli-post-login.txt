@@ -1,0 +1,99 @@
+Real `cre workflow simulate` run directly against the merged spend-cap-workflow,
+captured AFTER `cre login` was completed live in this session.
+Command run from cre-workflow/ (the project root), exactly as cre-workflow/README.md documents.
+Unedited terminal output follows.
+============================================================================
+$ time cre workflow simulate spend-cap-workflow --non-interactive --trigger-index 0 \
+    --http-payload '{"resourceId": "api-call-gpt4", "exactAmount": "0.30"}' --target staging-settings
+
+Initializing...
+Loading settings...
+! Using default private key for chain write simulation. To use your own key, set CRE_ETH_PRIVATE_KEY in your .env file or system environment.
+Checking RPC connectivity...
+! Some RPCs in settings are not functioning properly, please check: RPC health check failed:                                      
+[ethereum-testnet-sepolia] failed RPC health check: Post "http://localhost:8545": dial tcp [::1]:8545: connect: connection refused
+Compiling workflow...
+✓ Workflow compiled
+✓ Simulation limits enabled
+  HTTP: req=120kb resp=250kb timeout=10s | ConfHTTP: req=125kb resp=500kb timeout=1m30s | Consensus obs=25kb | ChainWrite evm_report=50kb evm_gas=10000000 solana_report=265b solana_cu=300000 | WASM binary=100mb compressed=20mb
+  Binary hash: 0c57ec5cc80547641b426c91b911327720c05625f69a6ff2e2fa30ea48a6efa6
+  Config hash: ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356
+✓ Parsed JSON input successfully
+✓ Created HTTP trigger payload with 2 fields
+2026-09-12T18:19:17Z [SIMULATION] Simulator Initialized
+
+2026-09-12T18:19:17Z [SIMULATION] Running trigger trigger=http-trigger@1.0.0-alpha
+╭────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Handler requested TEE Execution                                                                    │
+│ The simulator is not a real TEE, and is meant to debug.                                            │
+│ Do not use it for sensitive information.                                                           │
+│ During real execution, user logs for this trigger will not be visible, and will not leave the TEE. │
+│ They are presented in the simulator for debugging only.                                            │
+│                                                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+2026-09-12T18:19:17Z [USER LOG] Spend check: resource=api-call-gpt4 amount=0.3 cap=0.5 → ALLOW
+
+✓ Workflow Simulation Result:
+"{\"allowed\":true,\"reason\":\"CRE policy: allowed\"}"
+
+2026-09-12T18:19:17Z [SIMULATION] Execution finished signal received
+2026-09-12T18:19:17Z [SIMULATION] Skipping WorkflowEngineV2
+
+╭──────────────────────────────────────────────────────╮
+│ Simulation complete! Ready to deploy your workflow?  │
+│                                                      │
+│ Run cre account access to request deployment access. │
+╰──────────────────────────────────────────────────────╯
+
+real	0m7.816s
+user	0m27.075s
+sys	0m0.921s
+
+============================================================================
+$ time cre workflow simulate spend-cap-workflow --non-interactive --trigger-index 0 \
+    --http-payload '{"resourceId": "api-call-gpt4", "exactAmount": "5.00"}' --target staging-settings
+
+Initializing...
+Loading settings...
+! Using default private key for chain write simulation. To use your own key, set CRE_ETH_PRIVATE_KEY in your .env file or system environment.
+Checking RPC connectivity...
+! Some RPCs in settings are not functioning properly, please check: RPC health check failed:                                      
+[ethereum-testnet-sepolia] failed RPC health check: Post "http://localhost:8545": dial tcp [::1]:8545: connect: connection refused
+Compiling workflow...
+✓ Workflow compiled
+✓ Simulation limits enabled
+  HTTP: req=120kb resp=250kb timeout=10s | ConfHTTP: req=125kb resp=500kb timeout=1m30s | Consensus obs=25kb | ChainWrite evm_report=50kb evm_gas=10000000 solana_report=265b solana_cu=300000 | WASM binary=100mb compressed=20mb
+  Binary hash: 0c57ec5cc80547641b426c91b911327720c05625f69a6ff2e2fa30ea48a6efa6
+  Config hash: ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356
+✓ Parsed JSON input successfully
+✓ Created HTTP trigger payload with 2 fields
+2026-09-12T18:19:25Z [SIMULATION] Simulator Initialized
+
+2026-09-12T18:19:25Z [SIMULATION] Running trigger trigger=http-trigger@1.0.0-alpha
+╭────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Handler requested TEE Execution                                                                    │
+│ The simulator is not a real TEE, and is meant to debug.                                            │
+│ Do not use it for sensitive information.                                                           │
+│ During real execution, user logs for this trigger will not be visible, and will not leave the TEE. │
+│ They are presented in the simulator for debugging only.                                            │
+│                                                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+2026-09-12T18:19:25Z [USER LOG] Spend check: resource=api-call-gpt4 amount=5 cap=0.5 → DENY
+
+✓ Workflow Simulation Result:
+"{\"allowed\":false,\"reason\":\"CRE policy: spend cap exceeded (requested 5.00, cap 0.50)\"}"
+
+2026-09-12T18:19:25Z [SIMULATION] Execution finished signal received
+2026-09-12T18:19:25Z [SIMULATION] Skipping WorkflowEngineV2
+
+╭──────────────────────────────────────────────────────╮
+│ Simulation complete! Ready to deploy your workflow?  │
+│                                                      │
+│ Run cre account access to request deployment access. │
+╰──────────────────────────────────────────────────────╯
+
+real	0m7.997s
+user	0m27.839s
+sys	0m1.055s
