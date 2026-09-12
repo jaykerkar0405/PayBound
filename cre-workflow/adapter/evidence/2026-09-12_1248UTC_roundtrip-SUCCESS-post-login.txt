@@ -1,0 +1,53 @@
+Real, live ALLOW + DENY round-trip through cre-workflow/adapter/'s server.mjs,
+using prove-roundtrip.mjs (a line-by-line-verified mirror of
+apps/broker/src/cre-policy.ts's checkSpendPolicy() request/response logic).
+Captured AFTER `cre login` was completed live in this session — this supersedes
+the earlier BLOCKED attempt at 2026-09-12_1237UTC_roundtrip-BLOCKED-pre-login.txt,
+which is kept alongside this file as evidence the failure mode was real and is
+now resolved by a working CRE CLI session, nothing else.
+
+Command: node prove-roundtrip.mjs http://127.0.0.1:8090
+(server.mjs already running in the background, listening on :8090)
+============================================================================
+=== CASE 1: ALLOW (api-call-gpt4, 0.30 — under the 0.50 cap) ===
+
+--- REQUEST ---
+POST http://127.0.0.1:8090
+Content-Type: application/json
+{"resourceId":"api-call-gpt4","exactAmount":"0.30"}
+
+--- RESPONSE ---
+HTTP 200
+{"allowed":true,"reason":"CRE policy: allowed"}
+
+--- checkSpendPolicy() OUTCOME (cre-policy.ts L114-117) ---
+{"allowed":true,"reason":"CRE policy: allowed"}
+
+
+=== CASE 2: DENY (api-call-gpt4, 5.00 — over the 0.50 cap) ===
+
+--- REQUEST ---
+POST http://127.0.0.1:8090
+Content-Type: application/json
+{"resourceId":"api-call-gpt4","exactAmount":"5.00"}
+
+--- RESPONSE ---
+HTTP 200
+{"allowed":false,"reason":"CRE policy: spend cap exceeded (requested 5.00, cap 0.50)"}
+
+--- checkSpendPolicy() OUTCOME (cre-policy.ts L114-117) ---
+{"allowed":false,"reason":"CRE policy: spend cap exceeded (requested 5.00, cap 0.50)"}
+
+real	0m22.615s
+user	0m0.114s
+sys	0m0.018s
+
+============================================================================
+Server-side per-request timing (from server.mjs's own console log, i.e. the
+actual cre workflow simulate child-process duration measured inside the
+adapter, not the client-observed round-trip which also includes this box's
+own HTTP overhead — negligible here, but the adapter's own number is the
+more meaningful one for demo-timing purposes):
+
+[cre-adapter] cre workflow simulate spend-cap-workflow --non-interactive --trigger-index 0 --http-payload {"resourceId":"api-call-gpt4","exactAmount":"0.30"} --target staging-settings (13895ms)
+[cre-adapter] cre workflow simulate spend-cap-workflow --non-interactive --trigger-index 0 --http-payload {"resourceId":"api-call-gpt4","exactAmount":"5.00"} --target staging-settings (8578ms)

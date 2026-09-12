@@ -46,6 +46,25 @@ export const onHttpTrigger = (runtime: TeeRuntime<Config>, payload: HTTPPayload)
 
   const amount = parseFloat(request.exactAmount)
   const cap = parseFloat(capStr)
+
+  // Explicit lower-bound check — genuine defense in depth, not incidental.
+  // Without this, a negative exactAmount (e.g. "-5") satisfies `amount <=
+  // cap` for any positive cap and would be ALLOWed here, relying entirely
+  // on apps/broker's own /issue schema to have already rejected it
+  // upstream. This workflow shouldn't depend on that: a negative spend
+  // amount is never valid on its own terms, regardless of what called it.
+  // (A non-numeric exactAmount already denies safely via `NaN <= cap` /
+  // `amount < 0` both being false/true respectively for NaN in the
+  // expected direction — Number.isNaN below makes that explicit too,
+  // rather than leaving it as an accidental side effect of NaN comparison
+  // semantics.)
+  if (Number.isNaN(amount) || amount < 0) {
+    return JSON.stringify({
+      allowed: false,
+      reason: `Invalid exactAmount "${request.exactAmount}" — must be a non-negative number`,
+    })
+  }
+
   const allowed = amount <= cap
 
   // ⚠️ Logs are for simulation only and MUST be removed before deploying to

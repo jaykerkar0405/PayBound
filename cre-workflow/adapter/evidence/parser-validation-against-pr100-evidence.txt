@@ -1,0 +1,12 @@
+Found 4 real captured CLI runs in PR #100's evidence file.
+
+[PARSED OK] CASE: ALLOW — under the api-call-gpt4 cap (0.50)
+  -> {"allowed":true,"reason":"CRE policy: allowed"}
+[PARSED OK] CASE: DENY — over the api-call-gpt4 cap
+  -> {"allowed":false,"reason":"CRE policy: spend cap exceeded (requested 5.00, cap 0.50)"}
+[PARSED OK] CASE: FALLBACK-DEFAULT — resourceId not in table, falls to "default" cap (0.25)
+  -> {"allowed":false,"reason":"CRE policy: spend cap exceeded (requested 0.30, cap 0.25)"}
+[PARSED OK] CASE: FALLBACK-PERMISSIVE — neither resourceId nor "default" exists in the table
+  -> {"allowed":true,"reason":"No spend cap defined for resource"}
+
+ALL SECTIONS PARSED CORRECTLY against real, previously-captured CLI output.
