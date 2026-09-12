@@ -143,9 +143,11 @@ function _assertAuthorizationDecisionEventShape(
 // ---------------------------------------------------------------------------
 
 /**
- * Schema for a settlement-outcome audit event. Logged after
- * `submitToHedera()` (task 4.1) resolves, recording the transaction ID and
- * receipt status returned by the Hedera network.
+ * Schema for a settlement-outcome audit event. Logged after either
+ * settlement strategy — `submitToHedera()` (task 4.1, direct
+ * TransferTransaction) or `submitViaX402()` (submit-x402.ts, Hedera track
+ * Day 2) — resolves, recording which strategy settled the payment alongside
+ * the transaction ID and receipt status returned by the Hedera network.
  */
 export const settlementOutcomeEventSchema = z
   .object({
@@ -155,18 +157,21 @@ export const settlementOutcomeEventSchema = z
     timestamp: z.string(),
     /** The taskHash of the capability whose payment was settled. */
     taskHash: z.string(),
-    /** The Hedera transaction ID returned by submitToHedera() (task 4.1). */
+    /** The Hedera transaction ID returned by submitToHedera() or submitViaX402(). */
     hederaTransactionId: z.string(),
-    /** The receipt status string returned by submitToHedera() (e.g. "SUCCESS"). */
+    /** The receipt status string returned by submitToHedera() or submitViaX402() (e.g. "SUCCESS"). */
     status: z.string(),
+    /** Which settlement mechanism produced this outcome — see `HederaSubmissionResult.strategy` (submit.ts). */
+    settlementStrategy: z.enum(["hedera_direct", "hedera_x402"]),
   })
   .readonly()
-  .describe("HCS audit event: a Hedera settlement outcome (transactionId + receipt status).");
+  .describe("HCS audit event: a Hedera settlement outcome (strategy + transactionId + receipt status).");
 
 /**
- * A settlement-outcome audit event. Logged after task 4.1's
- * `submitToHedera()` resolves. `hederaTransactionId` and `status` come
- * directly from `submitToHedera()`'s return value.
+ * A settlement-outcome audit event. Logged after either settlement strategy
+ * — `submitToHedera()` (direct TransferTransaction) or `submitViaX402()`
+ * (submit-x402.ts) — resolves. `hederaTransactionId`, `status`, and
+ * `settlementStrategy` come directly from that call's `HederaSubmissionResult`.
  *
  * Hand-written to preserve field-level hover JSDoc; kept in sync with
  * `settlementOutcomeEventSchema` by `_assertSettlementOutcomeEventShape` below.
@@ -177,6 +182,7 @@ export interface SettlementOutcomeEvent {
   readonly taskHash: string;
   readonly hederaTransactionId: string;
   readonly status: string;
+  readonly settlementStrategy: "hedera_direct" | "hedera_x402";
 }
 
 function _assertSettlementOutcomeEventShape(

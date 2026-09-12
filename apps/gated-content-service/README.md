@@ -7,10 +7,11 @@ zero imports from `apps/broker` or any `packages/*`; Day 2 introduced exactly on
 dependency, `@paybound/x402-blocky402-client` (see "Architecture" below) — a generic,
 PayBound-agnostic x402/Blocky402 protocol client, not business logic, so this service
 still has no coupling to the Broker or its capability/payment model. Nothing here is
-wired into the Broker's real payment flow or `e2e-live-demo.ts` yet — Day 2 added a
-second, independent settlement strategy in `packages/settlement` that also consumes this
-service, but through the Broker's own credentials in a separate stage, not through this
-package.
+wired into the Broker's real payment flow — Day 2 added a second, independent settlement
+strategy in `packages/settlement` that also consumes this service, but through the
+Broker's own credentials in a separate stage, not through this package. That separate
+stage *is* now exercised end-to-end by `apps/broker/scripts/e2e-live-demo.ts`, which runs
+a real x402-gated content purchase against this service as part of its live run.
 
 ## Setup
 
