@@ -20,7 +20,8 @@ export function ResultPanel({ state, width }: { state: DashboardState; width?: n
   const txId = result?.hederaTransactionId;
   const hcsSeq = state.scenarioOutcome?.result?.hcsSequenceNumber ?? state.finalResult?.hcsSequenceNumber;
 
-  const borderColor = isFailed ? "red" : isSucceeded ? "green" : "gray";
+  const isPayRejected = state.stages.pay === "failed";
+  const borderColor = isPayRejected || isFailed ? "red" : isSucceeded ? "green" : "gray";
 
   return (
     <Box
@@ -34,6 +35,8 @@ export function ResultPanel({ state, width }: { state: DashboardState; width?: n
         <Text bold>SETTLEMENT & RUN STATE</Text>
         {isSucceeded ? (
           <Text color="green" bold>[✓ SETTLED]</Text>
+        ) : isPayRejected ? (
+          <Text color="red" bold>[✗ REJECTED]</Text>
         ) : isFailed ? (
           <Text color="red" bold>[✗ FAILED]</Text>
         ) : state.phase === "waiting" ? (
@@ -53,7 +56,9 @@ export function ResultPanel({ state, width }: { state: DashboardState; width?: n
       </Box>
       <Box justifyContent="space-between">
         <Text dimColor>Hedera Tx:</Text>
-        <Text bold={Boolean(txId)}>{txId ? txId : "(pending…)"}</Text>
+        <Text bold={Boolean(txId)}>
+          {txId ? txId : isPayRejected ? "(blocked — 0 HBAR moved)" : "(pending…)"}
+        </Text>
       </Box>
       <Box justifyContent="space-between">
         <Text dimColor>HCS Seq #:</Text>
@@ -64,8 +69,14 @@ export function ResultPanel({ state, width }: { state: DashboardState; width?: n
         <Text bold underline>STATUS:</Text>
         {isSucceeded ? (
           <Text color="green" bold>✓ MIRROR CONFIRMED</Text>
+        ) : isPayRejected ? (
+          <Text color="red" bold wrap="truncate-end">
+            ✗ {state.errorMessage ? state.errorMessage : "REJECTED BY BROKER (0 HBAR moved)"}
+          </Text>
         ) : isFailed ? (
-          <Text color="red" bold wrap="truncate-end">✗ {state.errorMessage ? state.errorMessage.slice(0, 20) : "FAILED"}</Text>
+          <Text color="red" bold wrap="truncate-end">
+            ✗ {state.errorMessage ? state.errorMessage : "FAILED"}
+          </Text>
         ) : (
           <Text dimColor>● RECONCILING HCS</Text>
         )}
