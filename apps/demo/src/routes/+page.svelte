@@ -4,20 +4,14 @@
     pushLog,
     reduceEvent,
     STAGE_ORDER,
+    STAGE_LABELS,
     type DashboardState,
-    type StageStatus,
   } from "$lib/shared/state.js";
-  import { parseLine, type StageId } from "$lib/shared/events.js";
-
-  const STAGE_SHORT: Record<StageId, string> = {
-    attest: "ATTEST",
-    issue: "ISSUE",
-    agent: "AGENT",
-    pay: "PAY",
-    settle: "SETTLE",
-    hcs: "HCS",
-    x402_purchase: "X402",
-  };
+  import { parseLine } from "$lib/shared/events.js";
+  import Card from "$lib/components/Card.svelte";
+  import PipelineStepper from "$lib/components/PipelineStepper.svelte";
+  import TransactionList from "$lib/components/TransactionList.svelte";
+  import ActivityLog from "$lib/components/ActivityLog.svelte";
 
   let dashboardState = $state<DashboardState>(initialState());
   let runId = $state<string | null>(null);
@@ -42,12 +36,12 @@
   const buttonDisabled = $derived(triggering || isRunning || retryAfterSeconds !== null);
   const buttonLabel = $derived(
     triggering
-      ? "STARTING…"
+      ? "Starting…"
       : isRunning
-        ? "RUN IN PROGRESS…"
+        ? "Run in progress…"
         : retryAfterSeconds !== null
-          ? `RETRY IN ${retryAfterSeconds}S`
-          : "RUN LIVE DEMO",
+          ? `Retry in ${retryAfterSeconds}s`
+          : "Run the live demo",
   );
 
   function cleanRawLine(line: string): string {
@@ -161,9 +155,6 @@
   );
   const isSucceeded = $derived(dashboardState.phase === "succeeded");
   const isFailed = $derived(dashboardState.phase === "failed" || dashboardState.phase === "exited");
-  const hcsSeq = $derived(
-    dashboardState.scenarioOutcome?.result?.hcsSequenceNumber ?? dashboardState.finalResult?.hcsSequenceNumber,
-  );
 
   function logColor(text: string): "red" | "green" | undefined {
     if (text.includes("ERROR") || text.includes("failed") || text.includes("✗")) return "red";
@@ -178,24 +169,7 @@
     return undefined;
   }
 
-  // --- Terminal box-drawing (renders real Unicode border characters,
-  // matching Ink's `borderStyle="single"` output exactly, instead of a CSS
-  // card with rounded corners and colored backgrounds — see the redesign
-  // note in this file's history for why: a CSS card reads as a generic
-  // web dashboard no matter how the colors are chosen, which isn't what
-  // an "exact replica of the TUI" means). ---
-  // Target interior width in character units. Top/bottom borders are NOT
-  // literal repeated "─" text — box-drawing glyphs don't reliably render
-  // at exactly 1ch across fonts, so a character-count-based border
-  // string drifted out of sync with the actual row width and triggered
-  // spurious horizontal scrollbars even on short content. Borders are
-  // real CSS lines instead (see .tbox/.tcap below): pixel-exact
-  // regardless of font, with literal ┌┐└┘ glyphs only at the corners,
-  // which don't need to line up with anything else.
-  const FULL = 88; // must comfortably fit the stage-badges row (7 badges + connectors, ~78 chars) without scrolling — the one row that can't be truncated
-  const HALF = 43; // each half of the two-column midsection
-
-  /** Ink can wrap text within a bordered Box (yoga layout); a fixed-width HTML row can't without breaking the border illusion, so long values (tx IDs, URLs) are truncated in the middle instead — same idea as ResultPanel's own `wrap="truncate-end"` elsewhere in this codebase. The untruncated value is always still the real href/title where relevant. */
+  /** Long values (tx IDs, hashes, URLs) are truncated in the middle rather than wrapped or clipped at the end, so the readable prefix and the verifiable suffix both stay visible. */
   function truncateMid(s: string, max: number): string {
     if (s.length <= max) return s;
     const keep = max - 1;
@@ -205,7 +179,7 @@
   }
 
   // ink-spinner's "dots" frame set, cycled at the same ~80ms it uses, for
-  // the one active-stage spinner the pipeline row shows.
+  // the pipeline stepper's one active-stage indicator.
   const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   let spinnerFrame = $state(0);
   $effect(() => {
@@ -217,232 +191,153 @@
 </script>
 
 <svelte:head>
-  <title>PayBound — Live Agent Runtime</title>
+  <title>PayBound — Agent Runtime</title>
 </svelte:head>
 
-<div class="shell" style:--shell-width="{FULL}ch">
-  <!-- BANNER -->
-  <div class="tbox" style:--cols="{FULL}">
-    <div class="tcap"><span class="corner">┌</span><span class="rule"></span><span class="corner">┐</span></div>
-    <div class="trow">
-      <div class="rc">
-        <span><span class="inverse"> PAYBOUND </span> <span class="bold">AGENT RUNTIME</span></span>
-        <span class="dim">HEDERA TESTNET · LIVE</span>
-      </div>
-    </div>
-    <div class="tcap"><span class="corner">└</span><span class="rule"></span><span class="corner">┘</span></div>
-  </div>
+<div class="page">
+  <header class="topbar">
+    <span class="brand">PayBound</span>
+    <span class="live-pill" class:active={isRunning}>
+      <span class="dot"></span>
+      Live on Hedera testnet
+    </span>
+  </header>
 
-  <!-- TRIGGER (deliberately unboxed, like the TUI's own footer/status line) -->
-  <div class="trigger">
-    <button onclick={triggerRun} disabled={buttonDisabled} class="term-btn">[ {buttonLabel} ]</button>
-    <div class="dim trigger-note">
-      {#if rateLimitMessage}
-        {rateLimitMessage}
-      {:else}
-        One click runs the real thing: a live agent reads attacker-controlled content, the broker structurally
-        can't be misdirected, and a real payment settles on Hedera testnet. Rate-limited to keep this safe to
-        leave public.
-      {/if}
-    </div>
-  </div>
-
-  <!-- PIPELINE EXECUTION -->
-  <div class="tbox" style:--cols="{FULL}">
-    <div class="tcap"><span class="corner">┌</span><span class="rule"></span><span class="corner">┐</span></div>
-    <div class="trow">
-      <div class="rc">
-        <span class="bold">PIPELINE EXECUTION</span>
-        <span>
-          {#if pipelineFailed}
-            <span class="red bold">PIPELINE FAILED</span>
-          {:else if completedCount === STAGE_ORDER.length}
-            <span class="green bold">ALL STAGES COMPLETE</span>
-          {:else}
-            <span class="dim">STAGE {completedCount + 1} OF {STAGE_ORDER.length}</span>
-          {/if}
-        </span>
-      </div>
-    </div>
-    <div class="trow">
-      <div class="rc single">
-        <span>
-          {#each STAGE_ORDER as stage, i (stage)}
-            {@const status = dashboardState.stages[stage] as StageStatus}
-            {#if status === "done"}<span class="green bold">[✓ {STAGE_SHORT[stage]}]</span
-              >{:else if status === "failed"}<span class="red bold">[✗ {STAGE_SHORT[stage]}]</span
-              >{:else if status === "active"}<span class="inverse bold"> {SPINNER_FRAMES[spinnerFrame]} {STAGE_SHORT[stage]} </span
-              >{:else}<span class="dim">[○ {STAGE_SHORT[stage]}]</span>{/if}{#if i < STAGE_ORDER.length - 1}<span class="dim"> ─ </span>{/if}
-          {/each}
-        </span>
-      </div>
-    </div>
-    <div class="tcap"><span class="corner">└</span><span class="rule"></span><span class="corner">┘</span></div>
-  </div>
-
-  <!-- TWO-COLUMN MIDSECTION -->
-  <div class="col-row">
-    <div class="tbox" style:--cols="{HALF}">
-      <div class="tcap"><span class="corner">┌</span><span class="rule"></span><span class="corner">┐</span></div>
-      <div class="trow">
-        <div class="rc">
-          <span class="bold">AGENT DISPATCH</span>
-          {#if dashboardState.lastToolCall}<span class="green bold">[DISPATCHED]</span>{:else}<span class="dim">[AWAITING]</span>{/if}
-        </div>
-      </div>
-      <div class="trow">
-        <div class="rc"><span class="dim">Function:</span><span class="bold">pay(capabilityId)</span></div>
-      </div>
-      <div class="trow">
-        <div class="rc">
-          <span class="dim">Capability:</span>
-          <span class="bold">{dashboardState.lastToolCall ? truncateMid(dashboardState.lastToolCall.capabilityId, 22) : "(pending…)"}</span>
-        </div>
-      </div>
-      <div class="trow">
-        <div class="rc">
-          <span class="dim">Timestamp:</span>
-          <span class="dim">{dashboardState.lastToolCall?.timestamp ? `${dashboardState.lastToolCall.timestamp.slice(11, 19)} UTC` : "(standby)"}</span>
-        </div>
-      </div>
-      <div class="trow">
-        <div class="rc"><span class="bold underline">POLICY:</span><span class="dim">no amount/dest field</span></div>
-      </div>
-      <div class="tcap"><span class="corner">└</span><span class="rule"></span><span class="corner">┘</span></div>
-    </div>
-
-    <div class="tbox" class:c-green={isSucceeded} class:c-red={isFailed} style:--cols="{HALF}">
-      <div class="tcap"><span class="corner">┌</span><span class="rule"></span><span class="corner">┐</span></div>
-      <div class="trow">
-        <div class="rc">
-          <span class="bold">RUN STATE</span>
-          {#if isSucceeded}<span class="green bold">[✓ SETTLED]</span
-            >{:else if isFailed}<span class="red bold">[✗ FAILED]</span
-            >{:else if dashboardState.phase === "waiting"}<span class="dim">[STANDBY]</span
-            >{:else}<span class="inverse bold"> SYNCING </span>{/if}
-        </div>
-      </div>
-      <div class="trow">
-        <div class="rc"><span class="dim">Scenario:</span><span class="bold">{dashboardState.scenario ?? "live-demo"}</span></div>
-      </div>
-      <div class="trow">
-        <div class="rc"><span class="dim">Task Hash:</span><span>{dashboardState.taskHash ? shortHash(dashboardState.taskHash) : "(seeding…)"}</span></div>
-      </div>
-      <div class="trow">
-        <div class="rc">
-          <span class="dim">Hedera Tx:</span>
-          <span class="bold">{result?.hederaTransactionId ? truncateMid(result.hederaTransactionId, 22) : "(pending…)"}</span>
-        </div>
-      </div>
-      <div class="trow">
-        <div class="rc"><span class="bold underline">STATUS:</span>
-          {#if isSucceeded}<span class="green bold">✓ CONFIRMED</span
-            >{:else if isFailed}<span class="red bold">✗ {dashboardState.errorMessage ? truncateMid(dashboardState.errorMessage, 20) : "FAILED"}</span
-            >{:else}<span class="dim">● RECONCILING</span>{/if}
-        </div>
-      </div>
-      <div class="tcap"><span class="corner">└</span><span class="rule"></span><span class="corner">┘</span></div>
-    </div>
-  </div>
-
-  <!-- TRANSACTION REGISTRY -->
-  <div class="tbox" class:c-green={dashboardState.txns.length > 0} style:--cols="{FULL}">
-    <div class="tcap"><span class="corner">┌</span><span class="rule"></span><span class="corner">┐</span></div>
-    <div class="trow">
-      <div class="rc">
-        <span class="bold">TRANSACTION REGISTRY</span>
-        <span class="dim">{dashboardState.txns.length} CONFIRMED</span>
-      </div>
-    </div>
-    {#if dashboardState.txns.length === 0}
-      <div class="trow">
-        <div class="rc single"><span class="dim">(waiting for Hedera transaction confirmations…)</span></div>
-      </div>
+  <section class="hero">
+    <h1>The agent can request a payment.<br />It can't choose who gets paid, or how much.</h1>
+    <p class="hero-sub">
+      One click runs the real pipeline against Hedera testnet: an agent reads attacker-controlled content, the
+      broker structurally can't be redirected, and a payment settles on-chain.
+    </p>
+    <button onclick={triggerRun} disabled={buttonDisabled} class="cta">{buttonLabel}</button>
+    {#if rateLimitMessage}
+      <p class="hero-note warn">{rateLimitMessage}</p>
     {:else}
-      {#each dashboardState.txns as tx, idx (tx.id)}
-        <div class="trow">
-          <div class="rc single">
-            <span
-              ><span class="green bold">[✓ 0{idx + 1}]</span> <span class="bold">{tx.label}</span>
-              <span class="dim">· {truncateMid(tx.id, 34)}</span>{#if tx.sequenceNumber !== undefined}<span class="dim"
-                >  · Seq {tx.sequenceNumber}</span
-              >{/if}</span
-            >
-          </div>
-        </div>
-        <div class="trow">
-          <div class="rc single">
-            <a class="green underline" href={tx.url} target="_blank" rel="noopener noreferrer"
-              >  └─ {truncateMid(tx.url, FULL - 6)}</a
-            >
-          </div>
-        </div>
-      {/each}
+      <p class="hero-note">Rate-limited to keep real API and HBAR cost bounded.</p>
     {/if}
-    <div class="tcap"><span class="corner">└</span><span class="rule"></span><span class="corner">┘</span></div>
-  </div>
+  </section>
 
-  <!-- AUDIT & TELEMETRY STREAM -->
-  <div class="tbox" style:--cols="{FULL}">
-    <div class="tcap"><span class="corner">┌</span><span class="rule"></span><span class="corner">┐</span></div>
-    <div class="trow">
-      <div class="rc">
-        <span class="bold">AUDIT &amp; TELEMETRY STREAM</span>
-        <span class="dim">{dashboardState.log.length} EVENTS</span>
-      </div>
-    </div>
-    <div class="scroll-region">
-      {#if dashboardState.log.length === 0}
-        <div class="trow">
-          <div class="rc single"><span class="dim">(waiting for telemetry stream…)</span></div>
-        </div>
+  <section class="pipeline">
+    <div class="pipeline-head">
+      <h2>Pipeline</h2>
+      {#if pipelineFailed}
+        <span class="status danger">Pipeline failed</span>
+      {:else if completedCount === STAGE_ORDER.length}
+        <span class="status success">All stages complete</span>
       {:else}
-        {#each dashboardState.log as line (line.id)}
-          {@const color = logColor(line.text)}
-          <div class="trow">
-            <div class="rc single">
-              <span class="dim">{String(line.id).padStart(2, "0")} {line.time} │</span>
-              <span class:red={color === "red"} class:green={color === "green"}> {truncateMid(line.text, FULL - 14)}</span>
-            </div>
-          </div>
-        {/each}
+        <span class="status">Stage {completedCount + 1} of {STAGE_ORDER.length}</span>
       {/if}
     </div>
-    <div class="tcap"><span class="corner">└</span><span class="rule"></span><span class="corner">┘</span></div>
+    <div class="pipeline-scroll">
+      <PipelineStepper
+        order={STAGE_ORDER}
+        stages={dashboardState.stages}
+        labels={STAGE_LABELS}
+        {spinnerFrame}
+        spinnerFrames={SPINNER_FRAMES}
+      />
+    </div>
+  </section>
+
+  <div class="grid-2">
+    <Card title="Agent dispatch">
+      {#snippet meta()}
+        {#if dashboardState.lastToolCall}<span class="success">Dispatched</span
+          >{:else}<span class="muted">Awaiting</span>{/if}
+      {/snippet}
+      <dl class="fact-list">
+        <div class="fact"><dt>Function called</dt><dd class="data">pay(capability_id)</dd></div>
+        <div class="fact">
+          <dt>Capability</dt>
+          <dd class="data">
+            {dashboardState.lastToolCall ? truncateMid(dashboardState.lastToolCall.capabilityId, 22) : "pending"}
+          </dd>
+        </div>
+        <div class="fact">
+          <dt>Requested at</dt>
+          <dd class="data muted">
+            {dashboardState.lastToolCall?.timestamp ? `${dashboardState.lastToolCall.timestamp.slice(11, 19)} UTC` : "—"}
+          </dd>
+        </div>
+      </dl>
+      <p class="note">No amount or destination field exists to inject into.</p>
+    </Card>
+
+    <Card title="Run state" strong={isSucceeded || isFailed}>
+      {#snippet meta()}
+        {#if isSucceeded}<span class="success">Settled</span
+          >{:else if isFailed}<span class="danger">Failed</span
+          >{:else if dashboardState.phase === "waiting"}<span class="muted">Standby</span
+          >{:else}<span class="accent">Syncing</span>{/if}
+      {/snippet}
+      <dl class="fact-list">
+        <div class="fact"><dt>Scenario</dt><dd class="data">{dashboardState.scenario ?? "live-demo"}</dd></div>
+        <div class="fact">
+          <dt>Task hash</dt>
+          <dd class="data">{dashboardState.taskHash ? shortHash(dashboardState.taskHash) : "seeding"}</dd>
+        </div>
+        <div class="fact">
+          <dt>Hedera tx</dt>
+          <dd class="data">{result?.hederaTransactionId ? truncateMid(result.hederaTransactionId, 22) : "pending"}</dd>
+        </div>
+      </dl>
+      <p class="note" class:success={isSucceeded} class:danger={isFailed}>
+        {#if isSucceeded}
+          Confirmed on Hedera testnet.
+        {:else if isFailed}
+          Failed{dashboardState.errorMessage ? `: ${truncateMid(dashboardState.errorMessage, 60)}` : "."}
+        {:else}
+          Reconciling…
+        {/if}
+      </p>
+    </Card>
   </div>
 
-  <div class="footer">
-    <span class="dim">source: github.com/jaykerkar0405/PayBound</span>
-    <span class="dim">a real broker + Ledger-emulated signer + Hedera testnet, not a mock</span>
-  </div>
+  <Card title="Transactions" strong={dashboardState.txns.length > 0}>
+    {#snippet meta()}<span class="muted">{dashboardState.txns.length} confirmed</span>{/snippet}
+    <TransactionList txns={dashboardState.txns} {truncateMid} />
+  </Card>
+
+  <Card title="Activity log">
+    {#snippet meta()}<span class="muted">{dashboardState.log.length} events</span>{/snippet}
+    <ActivityLog log={dashboardState.log} {truncateMid} {logColor} />
+  </Card>
+
+  <footer class="page-footer">
+    <a href="https://github.com/jaykerkar0405/PayBound" target="_blank" rel="noopener noreferrer"
+      >Source on GitHub</a
+    >
+    <span class="muted">Real broker, real Ledger-emulated signer, real Hedera testnet — not a simulation.</span>
+  </footer>
 </div>
 
 <style>
-  /*
-   * This page is a literal character-grid terminal, not a styled web
-   * card layout: real Unicode box-drawing borders (┌─┐│└─┘), no
-   * border-radius anywhere, no box-shadow, no colored backgrounds behind
-   * badges — colors are applied to TEXT exactly where
-   * apps/tui-dashboard's Ink components apply them (ink `color="green"`
-   * etc. only ever colors the glyph, never adds a fill or border chrome
-   * around it), nowhere else. A previous version of this page used CSS
-   * cards with rounded corners and colored borders/pills, which read as
-   * a generic web dashboard no matter the palette — this is the fix.
-   */
   :root {
-    --bg: #000000;
-    --fg: #d4d4d4;
-    --dim: #6a6a6a;
-    --green: #2f9e44;
-    --red: #c0392b;
+    --bg: #0a0a0a;
+    --surface-1: #141414;
+    --surface-2: #1c1c1c;
+    --border: #262626;
+    --border-strong: #404040;
+    --fg: #fafafa;
+    --fg-muted: #a1a1aa;
+    --fg-subtle: #71717a;
+    --accent: #3b82f6;
+    --success: #34d399;
+    --danger: #f87171;
   }
   @media (prefers-color-scheme: light) {
     :root {
-      --bg: #ffffff;
-      --fg: #1a1a1a;
-      --dim: #767676;
-      --green: #1e7a34;
-      --red: #a52422;
+      --bg: #fafafa;
+      --surface-1: #ffffff;
+      --surface-2: #f4f4f5;
+      --border: #e4e4e7;
+      --border-strong: #d4d4d8;
+      --fg: #18181b;
+      --fg-muted: #52525b;
+      --fg-subtle: #71717a;
+      --accent: #2563eb;
+      --success: #16a34a;
+      --danger: #dc2626;
     }
   }
 
@@ -456,144 +351,219 @@
     box-sizing: border-box;
   }
 
-  .shell {
-    width: var(--shell-width);
-    max-width: 100%;
-    margin: 0 auto;
-    padding: 24px 16px 48px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+  /* Shared text-utility classes — declared :global so the child
+     components (TransactionList, ActivityLog) that don't otherwise
+     share this stylesheet's scoping can also use them. */
+  :global(.data) {
     font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
-    font-size: 13px;
-    line-height: 1.45;
+  }
+  :global(.muted) {
+    color: var(--fg-subtle);
+  }
+  :global(.accent) {
+    color: var(--accent);
+  }
+  :global(.success) {
+    color: var(--success);
+  }
+  :global(.danger) {
+    color: var(--danger);
   }
 
-  /* --- terminal box primitives ---
-     Real CSS borders for the straight edges (pixel-exact, immune to
-     font-metric drift) with literal Unicode glyphs only at the four
-     corners, via .tcap. See the FULL/HALF comment above for why this
-     replaced a literal-┌─┐-text approach. */
-  .tbox {
-    --box-color: var(--dim);
-    width: calc(var(--cols) * 1ch);
-    max-width: 100%;
-    border-left: 1px solid var(--box-color);
-    border-right: 1px solid var(--box-color);
+  .page {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 32px 20px 56px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
   }
-  .tbox.c-green {
-    --box-color: var(--green);
-  }
-  .tbox.c-red {
-    --box-color: var(--red);
-  }
-  .tcap {
+
+  .topbar {
     display: flex;
     align-items: center;
-    height: 1px;
-    color: var(--box-color);
-  }
-  .tcap .corner {
-    flex: 0 0 auto;
-    line-height: 0;
-  }
-  .tcap .rule {
-    flex: 1 1 auto;
-    height: 0;
-    border-top: 1px solid var(--box-color);
-  }
-  .trow {
-    display: flex;
-    overflow-x: auto; /* safety net only — content is truncated well before this should ever trigger */
-  }
-  .rc {
-    flex: 1 1 auto;
-    display: flex;
     justify-content: space-between;
-    align-items: baseline;
-    gap: 1ch;
-    padding: 2px 1ch;
-    min-width: 0;
-    white-space: nowrap;
+    gap: 12px;
+    flex-wrap: wrap;
   }
-  .rc.single {
-    justify-content: flex-start;
+  .brand {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
   }
-  .scroll-region {
-    max-height: 260px;
-    overflow-y: auto;
-  }
-
-  /* --- unboxed trigger, same as the TUI's own out-of-box status/footer lines --- */
-  .trigger {
+  .live-pill {
     display: flex;
-    flex-direction: column;
     align-items: center;
     gap: 6px;
-    padding: 6px 8px 4px;
-    text-align: center;
+    font-size: 12px;
+    color: var(--fg-subtle);
   }
-  .term-btn {
+  .live-pill .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--fg-subtle);
+  }
+  .live-pill.active {
+    color: var(--accent);
+  }
+  .live-pill.active .dot {
+    background: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 0 4px;
+  }
+  .hero h1 {
+    margin: 0;
+    font-size: clamp(20px, 3vw, 26px);
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+  }
+  .hero-sub {
+    margin: 0;
+    max-width: 62ch;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--fg-muted);
+  }
+  .cta {
+    margin-top: 4px;
     font-family: inherit;
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    padding: 4px 12px;
-    background: transparent;
-    color: var(--fg);
-    border: none;
-    cursor: pointer;
-  }
-  .term-btn:hover:not(:disabled) {
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 18px;
+    border-radius: 8px;
+    border: 1px solid var(--fg);
     background: var(--fg);
     color: var(--bg);
+    cursor: pointer;
   }
-  .term-btn:disabled {
-    color: var(--dim);
+  .cta:hover:not(:disabled) {
+    opacity: 0.88;
+  }
+  .cta:disabled {
+    background: var(--surface-2);
+    border-color: var(--border);
+    color: var(--fg-subtle);
     cursor: not-allowed;
   }
-  .trigger-note {
-    max-width: 78ch;
+  .hero-note {
+    margin: 0;
+    font-size: 12px;
+    color: var(--fg-subtle);
+    max-width: 62ch;
+  }
+  .hero-note.warn {
+    color: var(--danger);
   }
 
-  .col-row {
+  .pipeline {
     display: flex;
-    gap: 2ch;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .pipeline-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .pipeline-head h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--fg);
+  }
+  .status {
+    font-size: 12px;
+    color: var(--fg-subtle);
+  }
+  .status.success {
+    color: var(--success);
+  }
+  .status.danger {
+    color: var(--danger);
+  }
+  .pipeline-scroll {
+    overflow-x: auto;
+    padding-bottom: 4px;
   }
 
-  .footer {
-    width: 100%;
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 640px) {
+    .grid-2 {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .fact-list {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .fact {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 13px;
+  }
+  .fact dt {
+    margin: 0;
+    color: var(--fg-muted);
+    font-weight: 400;
+    flex: 0 0 auto;
+  }
+  .fact dd {
+    margin: 0;
+    color: var(--fg);
+    text-align: right;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .note {
+    margin: 10px 0 0;
+    font-size: 12.5px;
+    color: var(--fg-subtle);
+    line-height: 1.5;
+  }
+
+  .page-footer {
     display: flex;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 4px;
-    padding: 4px 4px 0;
+    gap: 8px;
+    font-size: 12px;
+    padding-top: 8px;
   }
-
-  /* --- text-only modifiers, no chrome — this is the actual fix for
-     "too much green": color is a property of the glyph, never a fill,
-     border, or pill background. --- */
-  .bold {
-    font-weight: 700;
+  .page-footer a {
+    color: var(--fg-muted);
   }
-  .underline {
-    text-decoration: underline;
-  }
-  .dim {
-    color: var(--dim);
-  }
-  .green {
-    color: var(--green);
-  }
-  .red {
-    color: var(--red);
-  }
-  a.green {
-    text-decoration: none;
-  }
-  .inverse {
-    background: var(--fg);
-    color: var(--bg);
+  .page-footer a:hover {
+    color: var(--fg);
   }
 </style>
