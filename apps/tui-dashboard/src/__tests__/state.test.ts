@@ -256,4 +256,39 @@ describe("reduceEvent", () => {
     expect(state.errorMessage).toBe("Broker unreachable");
     expect(state.finalResult).toBeUndefined();
   });
+
+  it("records valid HH:MM:SS timestamps on log lines", () => {
+    let state = initialState();
+    state = reduceEvent(state, { type: "run_started" });
+    const log = state.log.at(-1);
+    expect(log).toBeDefined();
+    expect(log?.time).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+  });
+
+  it("records transaction registry entries with HashScan URLs for settlements and x402 purchases", () => {
+    let state = initialState();
+    state = reduceEvent(state, {
+      type: "final_result",
+      paid: true,
+      hederaTransactionId: "0.0.10421552@1789229589.057200788",
+      status: "SUCCESS",
+      hcsSequenceNumber: 415,
+      consensusTimestamp: "1789229590.123",
+      hashscanUrl: "https://hashscan.io/testnet/transaction/0.0.10421552@1789229589.057200788",
+    });
+    state = reduceEvent(state, {
+      type: "x402_purchase_result",
+      success: true,
+      hederaTransactionId: "0.0.7162784@1789229604.446383474",
+      status: "SUCCESS",
+      hashscanUrl: "https://hashscan.io/testnet/transaction/0.0.7162784@1789229604.446383474",
+    });
+
+    expect(state.txns).toHaveLength(2);
+    expect(state.txns[0]?.id).toBe("0.0.10421552@1789229589.057200788");
+    expect(state.txns[0]?.sequenceNumber).toBe(415);
+    expect(state.txns[0]?.url).toBe("https://hashscan.io/testnet/transaction/0.0.10421552@1789229589.057200788");
+    expect(state.txns[1]?.id).toBe("0.0.7162784@1789229604.446383474");
+    expect(state.txns[1]?.url).toBe("https://hashscan.io/testnet/transaction/0.0.7162784@1789229604.446383474");
+  });
 });
