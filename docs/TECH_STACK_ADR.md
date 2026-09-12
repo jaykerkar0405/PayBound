@@ -227,12 +227,25 @@ identically.
 | `@sveltejs/adapter-auto`  | 7.0.1                                                                                  | `apps/demo`                               |
 
 `@hashgraph/sdk` (2.81.0 per npm as of 2026-09-06), `@ledgerhq/hw-app-eth`
-(7.8.16), `@ledgerhq/hw-transport-node-hid`, `ai` (7.0.92, i.e. past the v5
-line referenced in the original brief), and `@chainlink/cre-sdk` are **not
-yet installed** — `packages/ledger-signer`, `packages/settlement`, and
-`apps/sandbox` are placeholders per the scaffolding scope, so these versions
-are recorded here as the versions confirmed to exist today, to be pinned
-when those packages gain real code in Phases 2-5.
+(7.8.16), `@ledgerhq/hw-transport-node-hid`, and `ai` (7.0.92, i.e. past the
+v5 line referenced in the original brief) are **not yet installed** —
+`packages/ledger-signer`, `packages/settlement`, and `apps/sandbox` are
+placeholders per the scaffolding scope, so these versions are recorded here
+as the versions confirmed to exist today, to be pinned when those packages
+gain real code.
+
+`@chainlink/cre-sdk`, by contrast, **is** installed now (task 5.3, issue
+#98) — pinned to `1.18.0`, alongside `viem` (2.34.0) and `zod` (3.25.76),
+matching the exact versions the verified `hello-confidential-workflows-ts`
+reference template uses (not npm-latest), since the real
+`Runner.newRunner({ configSchema })` signature requires a real Zod schema.
+It's installed under `cre-workflow/spend-cap-workflow/` — a new top-level
+package, not `packages/settlement` as this ADR originally anticipated —
+because the WASM-isolation decision documented above (L139-155) is exactly
+why: it's simpler to isolate the CRE workflow as its own top-level,
+WASM-targeting package than to carve out a WASM-only build target inside
+`packages/settlement` alongside that package's Node-targeted Hedera client
+code.
 
 ## Open Questions / Flags
 
