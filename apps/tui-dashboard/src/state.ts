@@ -2,7 +2,7 @@ import type { PbEvent, StageId } from "./events.js";
 
 export type StageStatus = "pending" | "active" | "done" | "failed";
 
-export const STAGE_ORDER: readonly StageId[] = ["attest", "issue", "agent", "pay", "settle", "hcs"];
+export const STAGE_ORDER: readonly StageId[] = ["attest", "issue", "agent", "pay", "settle", "hcs", "x402_purchase"];
 
 export const STAGE_LABELS: Record<StageId, string> = {
   attest: "Attest",
@@ -11,6 +11,7 @@ export const STAGE_LABELS: Record<StageId, string> = {
   pay: "Pay",
   settle: "Settle",
   hcs: "HCS",
+  x402_purchase: "X402",
 };
 
 export interface FinalResult {
@@ -142,10 +143,32 @@ export function reduceEvent(state: DashboardState, event: PbEvent): DashboardSta
         `FINAL: paid=${event.paid} tx=${event.hederaTransactionId} seq=${event.hcsSequenceNumber}`,
       );
 
-    case "run_error":
+    case "run_error": {
+      // A later run_error must override an earlier latched success — e.g. the
+      // x402 purchase stage failing after the original attest->hcs scenario
+      // already reported a final_result. Omitting finalResult here (rather
+      // than setting it to undefined — exactOptionalPropertyTypes forbids
+      // that) lets ResultPanel fall through to its "Run did not complete"
+      // branch instead of silently keeping the stale success on screen.
+      const { finalResult: _droppedFinalResult, ...rest } = state;
       return pushLog(
-        { ...state, phase: "failed", errorMessage: event.message },
+        { ...rest, phase: "failed", errorMessage: event.message },
         `ERROR (${event.source}): ${event.message}`,
       );
+    }
+
+    case "x402_purchase_result": {
+      const result: FinalResult = {
+        paid: event.success,
+        provider: "x402",
+        hederaTransactionId: event.hederaTransactionId,
+        status: event.status,
+        hashscanUrl: event.hashscanUrl,
+      };
+      return pushLog(
+        { ...state, phase: event.success ? "succeeded" : state.phase, finalResult: result },
+        `X402 PURCHASE: paid=${event.success} tx=${event.hederaTransactionId} status=${event.status}`,
+      );
+    }
   }
 }
