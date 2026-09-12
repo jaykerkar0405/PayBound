@@ -19,6 +19,18 @@ import {
 import { db } from "./db.js";
 import { tryReserveBudget } from "./budget.js";
 import { canonicalize } from "./hash.js";
+// Side-effect only: issuer.ts's top-level `CREATE TABLE IF NOT EXISTS
+// capabilities` must run before this module's own `db.prepare()` calls
+// below reference that table. ES modules evaluate each import's full
+// module graph before running the importer's own body, so this import
+// only has to appear somewhere in this file — but it has to exist. Without
+// it, whichever OTHER module happens to import this file first (e.g.
+// settlement.ts, which e2e-live-demo.ts imports before pay-for-gated-content.ts
+// ever reaches issuer.ts) silently determined whether `capabilities`
+// existed yet — working by accident on any dev machine whose broker.db
+// already had the table from an earlier run, and throwing
+// "SqliteError: no such table: capabilities" on a genuinely fresh database.
+import "./issuer.js";
 
 // ---------------------------------------------------------------------------
 // Reads/writes on the `capabilities` table (created by issuer.ts, task 1.3).
