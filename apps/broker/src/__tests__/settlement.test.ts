@@ -295,6 +295,113 @@ describe("settleAndRecord — Gap 1: hedera_transaction_id persistence", () => {
 });
 
 // ---------------------------------------------------------------------------
+// settleAndRecord — Fix 3: crash-recovery via a provisional RECOVERABLE
+// marker written before dispatch, not after (audit finding: a broker crash
+// between a successful Ledger signature and the settlement continuation
+// running left status = NULL forever, invisible to
+// getRecoverableSubmissions()'s `WHERE status = 'RECOVERABLE'` query even
+// when a real Hedera transaction ID had already been persisted).
+// ---------------------------------------------------------------------------
+
+describe("settleAndRecord — Fix 3: crash-recovery provisional marker", () => {
+  const orig4 = {
+    accountId: process.env.HEDERA_TESTNET_ACCOUNT_ID,
+    privateKey: process.env.HEDERA_TESTNET_PRIVATE_KEY,
+  };
+  afterEach(() => {
+    if (orig4.accountId === undefined) delete process.env.HEDERA_TESTNET_ACCOUNT_ID;
+    else process.env.HEDERA_TESTNET_ACCOUNT_ID = orig4.accountId;
+    if (orig4.privateKey === undefined) delete process.env.HEDERA_TESTNET_PRIVATE_KEY;
+    else process.env.HEDERA_TESTNET_PRIVATE_KEY = orig4.privateKey;
+  });
+  beforeEach(() => {
+    process.env.HEDERA_TESTNET_ACCOUNT_ID = "0.0.1234";
+    process.env.HEDERA_TESTNET_PRIVATE_KEY = "302e...";
+  });
+
+  it("the row already reads RECOVERABLE at the moment dispatch is attempted, before the dispatch call resolves", async () => {
+    const submitted = await setUpSubmitted();
+    let statusDuringDispatch: string | null = "not-yet-observed";
+
+    await settleAndRecord(submitted, fakeDeps({
+      // Observes the DB status from INSIDE the mocked dispatch call, i.e.
+      // exactly the moment a real submitToHedera() would be mid-flight —
+      // proving the provisional write happens strictly before dispatch,
+      // not as a side effect of it finishing.
+      submitToHedera: vi.fn().mockImplementation(async () => {
+        statusDuringDispatch = submissionStatus(submitted.capability.nonce);
+        return { outcome: "settled", transactionId: "0.0.1@700.0", status: "SUCCESS", strategy: "hedera_direct" };
+      }),
+    }));
+
+    expect(statusDuringDispatch).toBe("RECOVERABLE");
+    // And the real final status still correctly wins once dispatch completes.
+    expect(submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
+  });
+
+  it("a crash between dispatch and resolveSubmission is reconcilable by the startup sweep (the actual audit repro, simulated)", async () => {
+    const submitted = await setUpSubmitted();
+    const txId = "0.0.1@701.0";
+
+    // Simulates exactly the audit's live repro: kill -9 the broker after a
+    // real Hedera transaction ID was persisted but before resolveSubmission
+    // ever ran — by calling the two calls settleAndRecord would have made
+    // up to that point directly, and stopping there (never calling
+    // settleAndRecord/resolveSubmission at all, exactly as a real crash
+    // would never reach that line either).
+    const { markProvisionallyRecoverable, persistHederaTxId } = await import("../state-machine.js");
+    markProvisionallyRecoverable(submitted.capability.nonce);
+    persistHederaTxId(submitted.capability.nonce, txId);
+
+    // Before Fix 3, this row would never have reached this state at all —
+    // it would show status=NULL, and the line below would already be the
+    // failing assertion. Confirms the "crash" state is genuinely
+    // discoverable, not just eventually-consistent by luck.
+    expect(submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
+    expect(hederaTxIdForNonce(submitted.capability.nonce)).toBe(txId);
+
+    // Broker "restarts" — the startup sweep runs, exactly as
+    // apps/broker/src/index.ts calls it on every real boot.
+    await sweepRecoverablePayments({
+      queryHederaTransactionReceipt: vi.fn().mockResolvedValue({
+        outcome: "settled", transactionId: txId, status: "SUCCESS",
+      } satisfies HederaReconciliationResult),
+    });
+
+    expect(submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
+  });
+
+  it("a crash before ANY dispatch was attempted still leaves hedera_transaction_id NULL, correctly excluded from the sweep (documented residual — nothing to reconcile against)", async () => {
+    const submitted = await setUpSubmitted();
+    const { markProvisionallyRecoverable } = await import("../state-machine.js");
+    markProvisionallyRecoverable(submitted.capability.nonce);
+    // No persistHederaTxId call — simulates a crash before submitToHedera
+    // ever returned a transaction ID.
+
+    expect(submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
+    expect(hederaTxIdForNonce(submitted.capability.nonce)).toBeNull();
+
+    const queryFn = vi.fn();
+    await sweepRecoverablePayments({ queryHederaTransactionReceipt: queryFn });
+
+    // Correctly excluded — getRecoverableSubmissions() requires a non-NULL
+    // transaction ID, since there is genuinely nothing to query Hedera for.
+    expect(queryFn).not.toHaveBeenCalled();
+    expect(submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
+  });
+
+  it("does not mark RECOVERABLE at all when settlement is not configured (the intentional 'stays at SUBMITTED' terminal state is unaffected)", async () => {
+    delete process.env.HEDERA_TESTNET_ACCOUNT_ID;
+    delete process.env.HEDERA_TESTNET_PRIVATE_KEY;
+    const submitted = await setUpSubmitted();
+
+    await settleAndRecord(submitted, fakeDeps());
+
+    expect(submissionStatus(submitted.capability.nonce)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // sweepRecoverablePayments (Gap 1 + Gap 2 combined)
 // ---------------------------------------------------------------------------
 
