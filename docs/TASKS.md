@@ -199,10 +199,35 @@ Do this only after Phases 1–4 are solid, and treat it as cuttable if time runs
 - [x] **5.2** Integrate the Chainlink CRE confidential policy check as an
       optional pre-check before capability issuance, clearly gated so its
       failure/removal doesn't affect the core invariant. Depends on 5.1. *(Settlement)*
-      → **Done** — `apps/broker/src/cre-policy.ts`. Fail-open at every error
-      path. Documented in `docs/CAPABILITY_SPEC.md §"Chainlink CRE optional
-      policy check"`. 11 tests: 3 gating, 4 error fail-open, 3 happy-path,
-      1 route-level unreachable fail-open.
+      → **Done** — `apps/broker/src/cre-policy.ts`: the broker-side HTTP
+      client only (gating via `CRE_ENABLED`, fail-open at every error path,
+      `POST /issue` integration, `CRE_GATEWAY_URL`/`CRE_ENABLED` config).
+      This does **not** include the actual Chainlink CRE Confidential
+      Workflow the broker's gateway call talks to — that's task 5.3
+      (issue #98). Documented in `docs/CAPABILITY_SPEC.md §"Chainlink CRE
+      optional policy check"`. 11 tests: 3 gating, 4 error fail-open,
+      3 happy-path, 1 route-level unreachable fail-open.
+
+- [x] **5.3** Implement the real Chainlink CRE Confidential Workflow that
+      `apps/broker/src/cre-policy.ts`'s `checkSpendPolicy()` calls —
+      supersedes 5.1's design-only framing and 5.2's broker-side stub.
+      Depends on 5.2. *(Settlement)* → **Done** — issue #98. The real
+      workflow package lives at `cre-workflow/` (top-level, isolated from
+      the monorepo's Node-targeted build pipeline since CRE workflows
+      compile to WASM — see `docs/TECH_STACK_ADR.md` L139-155).
+      `cre-workflow/spend-cap-workflow/workflow.ts` registers the
+      spend-cap handler via `cre.handlerInTee` (the Confidential Workflow
+      prize's literal requirement), fetching the `SPEND_CAPS` secret
+      strictly inside the enclave and applying a three-tier cap lookup
+      (`resourceId` → `"default"` → permissive allow). Own unit test
+      suite (`main.test.ts`). Verified via real `cre workflow simulate`
+      runs against `staging-settings` — ALLOW, DENY, FALLBACK-DEFAULT,
+      and FALLBACK-PERMISSIVE, all matching expected output (see
+      `cre-workflow/evidence/simulation-output.txt` and
+      `cre-workflow/README.md`). `apps/broker/.env.example` updated with
+      `CRE_ENABLED=true` and `CRE_GATEWAY_URL` so the check runs on the
+      demo golden path judges will see. Unblocks #82 (demo recording) and
+      #85 (final submission).
 
 ## Phase 6 — Integration, Demo, and Submission
 
