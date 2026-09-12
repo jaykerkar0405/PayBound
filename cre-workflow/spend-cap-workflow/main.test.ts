@@ -55,6 +55,42 @@ describe("onHttpTrigger", () => {
     })
   })
 
+  test("denies a negative exactAmount, even though it is numerically <= any positive cap", () => {
+    const { runtime } = makeFakeTeeRuntime()
+
+    const result = JSON.parse(
+      onHttpTrigger(runtime, makePayload({ resourceId: "api-call-gpt4", exactAmount: "-5" }) as never),
+    )
+
+    expect(result).toEqual({
+      allowed: false,
+      reason: 'Invalid exactAmount "-5" — must be a non-negative number',
+    })
+  })
+
+  test("denies a non-numeric exactAmount explicitly, not just via NaN comparison semantics", () => {
+    const { runtime } = makeFakeTeeRuntime()
+
+    const result = JSON.parse(
+      onHttpTrigger(runtime, makePayload({ resourceId: "api-call-gpt4", exactAmount: "not-a-number" }) as never),
+    )
+
+    expect(result).toEqual({
+      allowed: false,
+      reason: 'Invalid exactAmount "not-a-number" — must be a non-negative number',
+    })
+  })
+
+  test("allows a zero exactAmount (zero is a valid, non-negative spend)", () => {
+    const { runtime } = makeFakeTeeRuntime()
+
+    const result = JSON.parse(
+      onHttpTrigger(runtime, makePayload({ resourceId: "api-call-gpt4", exactAmount: "0" }) as never),
+    )
+
+    expect(result).toEqual({ allowed: true, reason: "CRE policy: allowed" })
+  })
+
   test('falls back to the "default" cap when resourceId is not in the table', () => {
     const { runtime } = makeFakeTeeRuntime()
 
