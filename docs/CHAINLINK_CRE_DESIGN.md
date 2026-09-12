@@ -111,31 +111,66 @@ gated so its failure/removal doesn't affect the core invariant."_
 
 ---
 
-## Chainlink CRE job design (for task 5.2)
+## Chainlink CRE Confidential Workflow design (implemented in task 5.3, issue #98)
 
-The CRE job is a short TypeScript function deployed into a Chainlink DON
-confidential environment:
+The spend-cap check is a real Chainlink CRE Confidential Workflow — not a
+conceptual job description deployed outside this repo. It lives in
+[`cre-workflow/spend-cap-workflow/workflow.ts`](../cre-workflow/spend-cap-workflow/workflow.ts)
+(the confidential-workflow logic itself; `main.ts` alongside it is only the
+thin `Runner.newRunner`/`runner.run` entrypoint — see `cre-workflow/README.md`
+for why the two are split). `cre-workflow/` lives at the repo root, isolated
+from the rest of the monorepo's Node-targeted build pipeline, because CRE
+workflows compile to WASM — see `docs/TECH_STACK_ADR.md` (L139-155) for that
+rationale.
 
-```typescript
-// Chainlink CRE job (conceptual — deployed to DON, not in this repo)
-export async function evaluateSpendPolicy(
-  resourceId: string,
-  requestedAmount: string,   // decimal string, e.g. "0.10"
-): Promise<boolean> {
-  // Spending caps table lives in the confidential environment — not
-  // accessible outside the CRE job itself.
-  const cap = CONFIDENTIAL_CAPS[resourceId] ?? DEFAULT_CAP;
-  return new Decimal(requestedAmount).lte(cap);
-}
-```
+`initWorkflow` registers `onHttpTrigger` via `cre.handlerInTee` (not
+`cre.handler`) on an HTTP trigger — the literal Confidential Workflow prize
+requirement. Inside the handler, which runs inside a hardware-isolated TEE:
 
-The broker calls this via the Chainlink CRE HTTP gateway, which:
-- Returns a signed attestation (the boolean verdict + a CRE-generated
-  signature) that the broker verifies before trusting
-- Never exposes `CONFIDENTIAL_CAPS` to the caller
+1. The incoming request is parsed as `{ resourceId, exactAmount }` — the
+   exact shape `apps/broker/src/cre-policy.ts` sends (L91-96).
+2. `runtime.getSecret({ id: "SPEND_CAPS" })` fetches the spend-caps table
+   strictly inside the enclave — the Vault DON releases it only into an
+   attested enclave, and it is never logged or exposed outside the handler.
+3. A three-tier cap lookup: exact `resourceId` match → the `"default"` key
+   → if neither exists, a permissive `{ allowed: true, reason: "No spend
+   cap defined for resource" }`.
+4. The comparison uses `parseFloat` (a WASM runtime constraint — no
+   arbitrary-precision library).
+5. The allow/deny decision is logged via `runtime.log()`; the caps table
+   itself is never logged.
+6. The handler returns `JSON.stringify({ allowed, reason })`, matching
+   exactly what `apps/broker/src/cre-policy.ts` (L105-117) parses.
 
-The CRE job input/output schema and the gateway call are implemented in
-task 5.2 (`packages/cre-policy/src/`).
+See `cre-workflow/README.md` for setup and the verified `cre workflow
+simulate` commands, and `cre-workflow/evidence/simulation-output.txt` for
+real, unedited simulation output covering all four cases (ALLOW, DENY,
+FALLBACK-DEFAULT, FALLBACK-PERMISSIVE).
+
+### Local end-to-end wiring (evaluated, not usable as-is)
+
+`cre workflow simulate spend-cap-workflow --listen` was evaluated as a way
+to point the broker's `CRE_GATEWAY_URL` at a live local endpoint for a real
+round-trip test. It isn't suitable for that:
+
+- The workflow's result only appears in the simulator's own terminal log —
+  the HTTP response to the trigger request is always `200 OK` with an
+  empty body (confirmed via a direct `curl -i`, which showed
+  `Content-Length: 0`). `apps/broker/src/cre-policy.ts`'s `response.json()`
+  would throw on that empty body, landing in the existing fail-open `catch`
+  block (L118-128) — never blocking issuance, but also never reflecting the
+  real decision.
+- It rate-limits to one execution per 30 seconds.
+- Its debug endpoint expects the request wrapped as `{"input": {...}}`, not
+  the raw `{ resourceId, exactAmount }` body the broker sends.
+
+This is a property of the local `--listen` debug harness — a manual
+trigger-injection tool, not a synchronous request/response gateway matching
+the real production CRE HTTP trigger contract — not a defect in
+`workflow.ts`. The real logic is already correctly exercised by Phase 3's
+non-`--listen` `--http-payload` simulate runs (see
+`cre-workflow/evidence/simulation-output.txt`) and by `workflow.ts`'s own
+unit tests (`cre-workflow/spend-cap-workflow/main.test.ts`).
 
 ---
 
