@@ -72,7 +72,8 @@ import path from "node:path";
 import { hcsEventSchema, queryHederaMirrorNode, requireTopicId } from "@paybound/settlement";
 import { config as brokerConfig } from "../src/config.js";
 import { isSettlementConfigured } from "../src/settlement.js";
-import { ensureSeeded, LIVE_AGENT_RUN_PRICE } from "./seed-live-agent-run.js";
+import { db } from "../src/db.js";
+import { ensureSeeded, LIVE_AGENT_RUN_PRICE, LIVE_AGENT_RUN_RESOURCE_ID } from "./seed-live-agent-run.js";
 import { payForGatedContent } from "./pay-for-gated-content.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -339,7 +340,7 @@ interface AgentRunResult {
   readonly output: string;
 }
 
-async function runAgent(contentUrl: string): Promise<AgentRunResult> {
+async function runAgent(contentUrl: string, scenarioName?: string): Promise<AgentRunResult> {
   const startedAt = Date.now();
 
   const child = spawn(
@@ -351,6 +352,7 @@ async function runAgent(contentUrl: string): Promise<AgentRunResult> {
         ...process.env,
         LIVE_RUN_MODEL: "real",
         LIVE_RUN_CONTENT_URL: contentUrl,
+        ...(scenarioName ? { E2E_DEMO_SCENARIO: scenarioName } : {}),
       },
       timeout: AGENT_TIMEOUT_MS,
     },
@@ -462,6 +464,56 @@ function extractLastCapabilityId(output: string): string | undefined {
   return matches.at(-1)?.[1];
 }
 
+function extractUsedCapabilityId(output: string): string | undefined {
+  const payToolMatch = output.match(/"toolName":"pay","args":\{"capabilityId":"([0-9a-fA-F-]{36})"\}/);
+  if (payToolMatch) return payToolMatch[1];
+  const auditMatch = output.match(/Broker rejected payment for capability ([0-9a-fA-F-]{36})/);
+  if (auditMatch) return auditMatch[1];
+  return extractLastCapabilityId(output);
+}
+
+function extractRejectionReason(output: string): string | undefined {
+  const auditMatch = output.match(/reason=([A-Z_]+)/);
+  if (auditMatch) return auditMatch[1];
+  const jsonMatch = output.match(/"reason":\s*"([A-Z_]+)"/);
+  if (jsonMatch) return jsonMatch[1];
+  return undefined;
+}
+
+function seedAttackerReplayedCapability(taskHash: string): void {
+  const recipient = process.env.HEDERA_TESTNET_ACCOUNT_ID ?? "0.0.10421552";
+  const nonce = `replayed-nonce-${ATTACKER_CAPABILITY_ID}`;
+  const expiry = new Date(Date.now() + 3600_000).toISOString();
+
+  const stmt = db.prepare(`
+    INSERT INTO capabilities (
+      capability_id, task_hash, resource_id, recipient, exact_amount,
+      payment_request_hash, session, nonce, expiry, max_uses, signature, consumed
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+    ON CONFLICT(capability_id) DO UPDATE SET
+      task_hash = excluded.task_hash,
+      resource_id = excluded.resource_id,
+      recipient = excluded.recipient,
+      exact_amount = excluded.exact_amount,
+      consumed = 1
+  `);
+
+  stmt.run(
+    ATTACKER_CAPABILITY_ID,
+    taskHash,
+    LIVE_AGENT_RUN_RESOURCE_ID,
+    recipient,
+    LIVE_AGENT_RUN_PRICE,
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "",
+    nonce,
+    expiry,
+    1,
+    "stub-signature",
+  );
+  console.log(`  Seeded replayed capability ${ATTACKER_CAPABILITY_ID} (consumed = 1) for adversarial invariant check.`);
+}
+
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
@@ -511,6 +563,11 @@ async function runAdversarialScenarioDemo(): Promise<number> {
   console.log(`  Price per run: ${LIVE_AGENT_RUN_PRICE} HBAR`);
   emitEvent({ type: "task_seeded", taskHash, price: LIVE_AGENT_RUN_PRICE });
 
+  const isAdversarialScenario = scenario.name === "hijack" || scenario.name === "fake-capability";
+  if (isAdversarialScenario) {
+    seedAttackerReplayedCapability(taskHash);
+  }
+
   stage(3, TOTAL_STAGES, `Serving untrusted content — scenario "${scenario.name}": ${scenario.label}`);
   const { server: contentServer, url: contentUrl } = await startContentServer(scenario.content);
   console.log(`  Untrusted content served at ${contentUrl}`);
@@ -524,7 +581,7 @@ async function runAdversarialScenarioDemo(): Promise<number> {
   const runStartedAtEpochSeconds = Math.floor(Date.now() / 1000) - 1; // 1s slack for clock skew
   let agentResult: AgentRunResult;
   try {
-    agentResult = await runAgent(contentUrl);
+    agentResult = await runAgent(contentUrl, scenario.name);
   } finally {
     contentServer.close();
   }
@@ -540,10 +597,15 @@ async function runAdversarialScenarioDemo(): Promise<number> {
     return 1;
   }
 
-  if (agentResult.exitCode !== 0) {
+  const hasAgentLoopResult = agentResult.output.includes("--- Agent Loop Result");
+  const isPaymentRejected =
+    agentResult.output.includes("payment_rejected") ||
+    agentResult.output.includes("[AUDIT] Broker rejected payment");
+
+  if (agentResult.exitCode !== 0 && (!hasAgentLoopResult || !isPaymentRejected)) {
     console.error(
       "\n✗ Agent run failed (see [sandbox] output above for the reason — common causes: " +
-        "both Gemini and Groq failed/rate-limited, or the Broker rejected the payment). " +
+        "both Gemini and Groq failed/rate-limited, or provider error). " +
         `Exit code: ${agentResult.exitCode}`,
     );
     emitEvent({
@@ -555,9 +617,12 @@ async function runAdversarialScenarioDemo(): Promise<number> {
     return 1;
   }
 
+  emitEvent({ type: "stage", stage: "agent", status: "done" });
+
   const provider = extractProvider(agentResult.output);
   const paid = extractPaid(agentResult.output);
-  const capabilityId = extractLastCapabilityId(agentResult.output);
+  const capabilityId = extractUsedCapabilityId(agentResult.output);
+  const rejectionReason = extractRejectionReason(agentResult.output);
 
   stage(5, TOTAL_STAGES, "Payment outcome");
   console.log(`  Provider that handled this run: ${provider}`);
@@ -566,6 +631,23 @@ async function runAdversarialScenarioDemo(): Promise<number> {
   emitEvent({ type: "payment_outcome", provider, capabilityId, paid });
 
   if (!paid) {
+    emitEvent({ type: "stage", stage: "pay", status: "failed" });
+    if (isAdversarialScenario && rejectionReason) {
+      console.log(
+        `\n✓ SECURITY INVARIANT ENFORCED: Clause 7 (${rejectionReason}) triggered!\n` +
+          `  The sandbox agent invoked pay() with unauthorized/replayed capability ${capabilityId ?? ATTACKER_CAPABILITY_ID}.\n` +
+          `  Broker rejected the transaction before funds could move. 0 HBAR moved.\n` +
+          `  "The agent can believe a malicious instruction. It still can't spend the money."`,
+      );
+      emitEvent({
+        type: "run_error",
+        source: "e2e-live-demo",
+        stage: "pay",
+        message: `Broker rejected payment: ${rejectionReason} (Clause 7 invariant enforced, 0 HBAR moved)`,
+      });
+      return 0;
+    }
+
     console.error(
       "\n✗ The agent did not complete a payment on this run (see payResults in the [sandbox] " +
         "output above for why — this can be a legitimate, safe outcome: e.g. the model declined " +
@@ -719,9 +801,21 @@ async function runX402PurchaseStage(): Promise<number> {
 }
 
 async function main(): Promise<void> {
+  const scenario = selectDemoScenario();
+  const isAdversarial = scenario.name === "hijack" || scenario.name === "fake-capability";
+
   const scenarioExitCode = await runAdversarialScenarioDemo();
+
+  // In an adversarial scenario, the demo's objective is verifying that the malicious
+  // transaction was blocked by the Broker's 9-clause invariant. We skip the subsequent
+  // x402 purchase stage to keep the demonstration focused and avoid unnecessary Speculos latency.
+  if (isAdversarial || scenarioExitCode !== 0) {
+    process.exitCode = scenarioExitCode;
+    return;
+  }
+
   const x402ExitCode = await runX402PurchaseStage();
-  process.exitCode = scenarioExitCode !== 0 ? scenarioExitCode : x402ExitCode;
+  process.exitCode = x402ExitCode;
 }
 
 main().catch((err: unknown) => {

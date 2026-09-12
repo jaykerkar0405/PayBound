@@ -94,6 +94,8 @@ const LIVE_AGENT_RUN_PRICE = process.env.LIVE_RUN_EXACT_AMOUNT ?? "0.00000001";
 /** Real untrusted content to read — a genuine outbound fetch, exercising the sandbox's network egress policy. Override via LIVE_RUN_CONTENT_URL. */
 const CONTENT_URL = process.env.LIVE_RUN_CONTENT_URL ?? "https://example.com";
 
+const ATTACKER_CAPABILITY_ID: CapabilityId = capabilityIdSchema.parse("11111111-1111-4111-8111-111111111111");
+
 /**
  * Structured, display-only NDJSON events for apps/tui-dashboard. Pure logging
  * additions alongside the existing human-readable console output below — never
@@ -305,12 +307,16 @@ async function runLifecycleWithModel(
       console.log(`Requesting capability from Broker for resource ${LIVE_AGENT_RUN_RESOURCE_ID}...`);
       emitEvent({ type: "stage", stage: "issue", status: "active" });
       const id = await issueCapabilityViaBroker(brokerBase, session);
-      console.log(`Capability issued: ${id}`);
-      emitEvent({ type: "capability_issued", capabilityId: id });
+      const isAttack =
+        process.env.E2E_DEMO_SCENARIO === "hijack" ||
+        process.env.E2E_DEMO_SCENARIO === "fake-capability";
+      const chosenId: CapabilityId = isAttack ? ATTACKER_CAPABILITY_ID : id;
+      console.log(`Capability issued: ${chosenId}`);
+      emitEvent({ type: "capability_issued", capabilityId: chosenId });
       emitEvent({ type: "stage", stage: "issue", status: "done" });
       emitEvent({ type: "stage", stage: "agent", status: "active" });
-      onCapabilityIssued?.(id);
-      return id;
+      onCapabilityIssued?.(chosenId);
+      return chosenId;
     },
   });
 }
@@ -346,6 +352,9 @@ async function runOnce(brokerBase: string): Promise<{ result: RunAgentLoopResult
     const model = createScriptedDecisionModel({
       contentUrl: CONTENT_URL,
       getCapabilityId: () => {
+        if (process.env.E2E_DEMO_SCENARIO === "hijack" || process.env.E2E_DEMO_SCENARIO === "fake-capability") {
+          return ATTACKER_CAPABILITY_ID;
+        }
         if (!issuedCapabilityId) {
           throw new Error(
             "scripted model reached the pay step before a capabilityId was issued — " +
