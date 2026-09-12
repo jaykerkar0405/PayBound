@@ -491,9 +491,15 @@ async function runAdversarialScenarioDemo(): Promise<number> {
 
   const brokerHost = process.env.BROKER_HOST ?? "127.0.0.1";
   const brokerPort = Number(process.env.BROKER_PORT ?? brokerConfig.port);
+  // A protocol-qualified brokerHost (e.g. a real deployed broker's
+  // "https://your-broker.onrender.com") is treated as a complete origin,
+  // with no port appended — hosted HTTPS/HTTP ports (443/80) are implicit,
+  // and appending brokerPort's default would build a URL nothing listens
+  // on. See apps/sandbox/src/config.ts's brokerBaseUrl() for the same rule
+  // applied on the sandbox side.
   const brokerUrl =
     brokerHost.startsWith("http://") || brokerHost.startsWith("https://")
-      ? `${brokerHost}:${brokerPort}`
+      ? brokerHost
       : `http://${brokerHost}:${brokerPort}`;
 
   stage(1, TOTAL_STAGES, "Pre-flight checks (Broker, Speculos, settlement config, model provider key)...");
