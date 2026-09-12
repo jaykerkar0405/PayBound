@@ -46,9 +46,18 @@ export interface TrackOutcome {
 export interface LogLine {
   readonly id: number;
   readonly text: string;
+  readonly time: string;
 }
 
 export type ProcessPhase = "waiting" | "running" | "succeeded" | "failed" | "exited";
+
+export interface TxLogEntry {
+  readonly id: string;
+  readonly label: string;
+  readonly status: string;
+  readonly sequenceNumber?: number;
+  readonly url: string;
+}
 
 export interface DashboardState {
   readonly phase: ProcessPhase;
@@ -66,6 +75,7 @@ export interface DashboardState {
   readonly scenarioOutcome?: TrackOutcome;
   /** Independent outcome of the separate x402 gated-content purchase stage — see `TrackOutcome`. */
   readonly x402Outcome?: TrackOutcome;
+  readonly txns: readonly TxLogEntry[];
 }
 
 const MAX_LOG_LINES = 10;
@@ -74,13 +84,14 @@ let logIdCounter = 0;
 export function initialState(): DashboardState {
   const stages = {} as Record<StageId, StageStatus>;
   for (const s of STAGE_ORDER) stages[s] = "pending";
-  return { phase: "waiting", stages, log: [] };
+  return { phase: "waiting", stages, log: [], txns: [] };
 }
 
-export function pushLog(state: DashboardState, text: string): DashboardState {
+export function pushLog(state: DashboardState, text: string, time?: string): DashboardState {
   const trimmed = text.trim();
   if (!trimmed) return state;
-  const entry: LogLine = { id: ++logIdCounter, text: trimmed };
+  const now = time ?? new Date().toTimeString().slice(0, 8);
+  const entry: LogLine = { id: ++logIdCounter, text: trimmed, time: now };
   return { ...state, log: [...state.log, entry].slice(-MAX_LOG_LINES) };
 }
 
@@ -193,6 +204,18 @@ function stageLogText(stage: StageId, status: StageStatus): string {
   return `${label}: ${status}`;
 }
 
+function addTxn(state: DashboardState, txn: TxLogEntry): DashboardState {
+  const current = state.txns ?? [];
+  const existingIdx = current.findIndex((t) => t.id === txn.id);
+  if (existingIdx !== -1) {
+    const updated = [...current];
+    const prev = updated[existingIdx];
+    if (prev) updated[existingIdx] = { ...prev, ...txn };
+    return { ...state, txns: updated };
+  }
+  return { ...state, txns: [...current, txn] };
+}
+
 /**
  * Folds one parsed event into dashboard state. Pure and total over every
  * `PbEvent` variant — an event this dashboard doesn't recognize simply isn't
@@ -243,20 +266,43 @@ export function reduceEvent(state: DashboardState, event: PbEvent): DashboardSta
         `Payment outcome — provider=${event.provider} paid=${event.paid}`,
       );
 
-    case "settlement_found":
+    case "settlement_found": {
+      const url = `https://hashscan.io/testnet/transaction/${event.hederaTransactionId}`;
+      const withTx = addTxn(state, {
+        id: event.hederaTransactionId,
+        label: "Scenario Settlement",
+        status: event.status,
+        sequenceNumber: event.sequenceNumber,
+        url,
+      });
       return pushLog(
-        state,
+        withTx,
         `Settlement found on HCS: status=${event.status} tx=${event.hederaTransactionId} seq=${event.sequenceNumber}`,
       );
+    }
 
-    case "mirror_confirmed":
-      return pushLog(state, `Mirror node reconfirmed: outcome=${event.outcome} status=${event.status}`);
+    case "mirror_confirmed": {
+      const current = state.txns ?? [];
+      const updated = current.map((t) =>
+        event.hashscanUrl.includes(t.id) ? { ...t, url: event.hashscanUrl, status: event.status } : t,
+      );
+      return pushLog({ ...state, txns: updated }, `Mirror node reconfirmed: outcome=${event.outcome} status=${event.status}`);
+    }
 
-    case "final_result":
+    case "final_result": {
+      const url = event.hashscanUrl ?? `https://hashscan.io/testnet/transaction/${event.hederaTransactionId}`;
+      const withTx = addTxn(state, {
+        id: event.hederaTransactionId,
+        label: "Scenario Settlement",
+        status: event.status,
+        sequenceNumber: event.hcsSequenceNumber,
+        url,
+      });
       return pushLog(
-        applyTrackOutcome(state, "scenario", { status: "succeeded", result: { ...event } }),
+        applyTrackOutcome(withTx, "scenario", { status: "succeeded", result: { ...event } }),
         `FINAL: paid=${event.paid} tx=${event.hederaTransactionId} seq=${event.hcsSequenceNumber}`,
       );
+    }
 
     case "run_error": {
       // Routes to whichever of the two independent stages this error
@@ -284,8 +330,15 @@ export function reduceEvent(state: DashboardState, event: PbEvent): DashboardSta
       const outcome: TrackOutcome = event.success
         ? { status: "succeeded", result }
         : { status: "failed", result, errorMessage: `x402 purchase failed (status ${event.status})` };
+      const url = event.hashscanUrl || `https://hashscan.io/testnet/transaction/${event.hederaTransactionId}`;
+      const withTx = addTxn(state, {
+        id: event.hederaTransactionId,
+        label: "x402 Gated Purchase",
+        status: event.status,
+        url,
+      });
       return pushLog(
-        applyTrackOutcome(state, "x402", outcome),
+        applyTrackOutcome(withTx, "x402", outcome),
         `X402 PURCHASE: paid=${event.success} tx=${event.hederaTransactionId} status=${event.status}`,
       );
     }
