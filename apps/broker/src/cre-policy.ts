@@ -38,12 +38,27 @@ export interface CrePolicyDeps {
    * Reads `CRE_GATEWAY_URL` lazily from `process.env`.
    */
   readonly gatewayUrl: () => string | undefined;
+  /**
+   * Reads `CRE_GATEWAY_TIMEOUT_MS` lazily from `process.env` (default
+   * 5000ms — matching the only other numeric wait-then-give-up constant
+   * already established in this package, `db.ts`'s `busy_timeout = 5000`).
+   * Bounds the gateway `fetch()` call below: a gateway that accepts a TCP
+   * connection and never responds (a realistic overloaded-backend failure
+   * mode, distinct from a fast connection refusal) would otherwise hang
+   * this call — and therefore `/issue` — indefinitely, contradicting the
+   * "a broken CRE gateway can never take /issue offline" guarantee this
+   * module documents. A timeout is treated as just another fetch failure
+   * below: it lands in the same `catch` block and fails open exactly like
+   * a network error, a bad response, or a malformed body.
+   */
+  readonly timeoutMs: () => number;
 }
 
 const defaultDeps: CrePolicyDeps = {
   fetchFn: fetch,
   isEnabled: () => process.env.CRE_ENABLED === "true",
   gatewayUrl: () => process.env.CRE_GATEWAY_URL,
+  timeoutMs: () => Number(process.env.CRE_GATEWAY_TIMEOUT_MS ?? 5000),
 };
 
 /**
@@ -93,6 +108,11 @@ export async function checkSpendPolicy(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ resourceId, exactAmount }),
+      // Bounds a gateway that accepts a connection but never responds —
+      // see the `timeoutMs` doc comment above. A timeout aborts the fetch,
+      // which throws and is caught by this function's own catch block
+      // below, failing open exactly like any other unreachable gateway.
+      signal: AbortSignal.timeout(deps.timeoutMs()),
     });
 
     if (!response.ok) {

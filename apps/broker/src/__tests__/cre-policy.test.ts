@@ -22,6 +22,7 @@ function fakeDeps(overrides: Partial<CrePolicyDeps> = {}): CrePolicyDeps {
     fetchFn: vi.fn(),
     isEnabled: () => false,
     gatewayUrl: () => undefined,
+    timeoutMs: () => 5000,
     ...overrides,
   };
 }
@@ -104,6 +105,45 @@ describe("checkSpendPolicy — fail-open on all error paths", () => {
       enabledDeps(mockFetch("not-an-object")),
     );
     expect(result.allowed).toBe(true);
+  });
+
+  it("returns allowed=true, within the configured timeout, when the gateway accepts a connection and never responds", async () => {
+    // A real TCP listener that accepts the connection but never writes a
+    // response — the specific failure mode a fast connection-refused
+    // mock (ECONNREFUSED, above) cannot exercise, since that fails
+    // instantly rather than hanging. Uses a real timer/timeout, not a
+    // mocked one, so this proves the actual AbortSignal.timeout wiring
+    // works end-to-end, not just that the code path exists.
+    const { createServer } = await import("node:net");
+    const server = createServer((socket) => {
+      // Accept the connection; never respond, never close it.
+      socket.on("error", () => {}); // ignore the eventual abort-triggered RST/close
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+
+    const startedAt = Date.now();
+    const result = await checkSpendPolicy(
+      "res-1", "0.10",
+      fakeDeps({
+        fetchFn: fetch, // the real global fetch — this test needs a real, live AbortSignal.timeout race, not a mock
+        isEnabled: () => true,
+        gatewayUrl: () => `http://127.0.0.1:${port}/`,
+        timeoutMs: () => 200, // short, so the test itself stays fast
+      }),
+    );
+    const elapsedMs = Date.now() - startedAt;
+
+    server.close();
+
+    expect(result.allowed).toBe(true);
+    expect(result.reason).toContain("CRE gateway unreachable");
+    // Must resolve close to the configured timeout, not hang indefinitely
+    // (the whole point of this fix) and not resolve suspiciously instantly
+    // (which would mean the timeout wasn't actually wired to the fetch call).
+    expect(elapsedMs).toBeGreaterThanOrEqual(150);
+    expect(elapsedMs).toBeLessThan(5000);
   });
 });
 
