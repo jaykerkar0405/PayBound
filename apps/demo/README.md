@@ -70,11 +70,17 @@ pnpm dev
 
 - Root Directory: repo root (blank) — this spawns sibling apps by relative
   path, so it needs the whole monorepo checkout, not just `apps/demo`.
-- Build: `pnpm install --frozen-lockfile && pnpm exec turbo run build --filter=demo`
-  (deliberately **not** `--filter demo...` on the install — the spawned
-  `e2e-live-demo.ts`/`live-run.ts` are sibling processes, not declared
-  package.json dependencies, so a scoped install would skip
-  `apps/broker`'s and `apps/sandbox`'s own `node_modules`.)
+- Build: `pnpm install --frozen-lockfile && pnpm exec turbo run build`
+  (deliberately **not** `--filter=demo` — `apps/broker` and `apps/sandbox`
+  are spawned as sibling *processes*, not declared package.json
+  dependencies of `demo`, so Turbo's dependency graph never builds them
+  or the `@paybound/*` workspace packages they import — every one of
+  which ships as `main: "./dist/index.js"` with `dist/` gitignored — when
+  the build is scoped to `--filter=demo`. That scoping produces a demo
+  service that starts fine but fails every run with `ERR_MODULE_NOT_FOUND`
+  the moment the spawned script tries to import an unbuilt workspace
+  package. Building the whole repo is the only filter that's
+  actually correct here; Turbo's cache keeps repeat builds cheap.)
 - Start: `pnpm --filter demo start` (runs `node build/index.js`).
 - Env vars: see `.env.example`. `BROKER_HOST` and `GATED_CONTENT_URL`
   should point at your other two deployed Render services' real URLs.
