@@ -27,11 +27,16 @@ process.on("unhandledRejection", (err) => {
   console.error("[tui-dashboard] unhandled rejection (display-only):", err);
 });
 
+// Clear terminal screen and place cursor at top-left so the TUI starts at the very top of the window
+process.stdout.write("\x1b[2J\x1b[H");
+
 const { unmount, waitUntilExit } = render(<App replayFile={replayFile} />);
 
 process.on("SIGINT", () => {
   unmount();
+  process.stdout.write("\x1b[?25h\n");
   process.exit(0);
 });
 
 await waitUntilExit();
+process.stdout.write("\x1b[?25h\n");
