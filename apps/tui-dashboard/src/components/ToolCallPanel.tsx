@@ -10,18 +10,21 @@ import type { DashboardState } from "../state.js";
  */
 export function ToolCallPanel({ state, width }: { state: DashboardState; width?: number }): React.JSX.Element {
   const call = state.lastToolCall;
+  const isPayRejected = state.stages.pay === "failed";
 
   return (
     <Box
       flexDirection="column"
       borderStyle="single"
-      borderColor="gray"
+      borderColor={isPayRejected ? "red" : "gray"}
       paddingX={1}
       width={width}
     >
       <Box justifyContent="space-between">
         <Text bold>AGENT TOOL DISPATCH</Text>
-        {call ? (
+        {isPayRejected ? (
+          <Text color="red" bold>[REJECTED]</Text>
+        ) : call ? (
           <Text color="green" bold>[DISPATCHED]</Text>
         ) : (
           <Text dimColor>[AWAITING]</Text>
@@ -48,7 +51,11 @@ export function ToolCallPanel({ state, width }: { state: DashboardState; width?:
       </Box>
       <Box justifyContent="space-between">
         <Text bold underline>POLICY:</Text>
-        <Text dimColor>Zero model tampering</Text>
+        {isPayRejected ? (
+          <Text color="red" bold>Invariant: Clause 7 (REPLAY) enforced</Text>
+        ) : (
+          <Text dimColor>Zero model tampering</Text>
+        )}
       </Box>
     </Box>
   );
