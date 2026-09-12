@@ -1,18 +1,25 @@
 import React from "react";
 import { Box, Text } from "ink";
-import Gradient from "ink-gradient";
-import BigText from "ink-big-text";
 
-/** Panel 1 — "PayBound — Live Payment Trace". Purely decorative; reads no state. */
+/**
+ * Top command header — compact monochrome banner.
+ * Exactly 3 lines high to ensure the dashboard fits inside standard terminal rows.
+ */
 export function Banner(): React.JSX.Element {
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Gradient name="cristal">
-        <BigText text="PayBound" font="tiny" />
-      </Gradient>
-      <Text color="cyanBright" bold>
-        Live Payment Trace
-      </Text>
+    <Box
+      justifyContent="space-between"
+      borderStyle="single"
+      borderColor="gray"
+      paddingX={1}
+    >
+      <Box gap={1}>
+        <Text inverse bold>
+          {" "}PAYBOUND{" "}
+        </Text>
+        <Text bold>AGENT RUNTIME</Text>
+      </Box>
+      <Text dimColor>HEDERA TESTNET │ HSM: ACTIVE</Text>
     </Box>
   );
 }

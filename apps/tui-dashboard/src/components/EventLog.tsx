@@ -1,26 +1,73 @@
 import React from "react";
 import { Box, Text } from "ink";
-import type { DashboardState } from "../state.js";
+import type { DashboardState, LogLine } from "../state.js";
+
+function getLogColor(text: string): "red" | "green" | undefined {
+  if (text.includes("ERROR") || text.includes("failed") || text.includes("✗")) {
+    return "red";
+  }
+  if (
+    text.includes("FINAL") ||
+    text.includes("SUCCESS") ||
+    text.includes("✓") ||
+    text.includes("paid=true") ||
+    text.includes("Settlement found")
+  ) {
+    return "green";
+  }
+  return undefined;
+}
 
 /**
- * Panel 4 — a bounded, rolling window (see state.ts's `pushLog`, capped at
- * the last 10 lines) of real [AUDIT]/stage events with timestamps implicit
- * in arrival order. Reducer updates append/replace a small fixed-size
- * array, so React/Ink only ever diffs ~10 <Text> nodes per update, not a
- * growing transcript — the update cost stays flat for the whole run.
+ * Event Stream Panel — Displays real-time [AUDIT], stage, and settlement events.
+ * Formats each entry with zero-padded line numbers and HH:MM:SS timestamps.
+ * Uses wrap="wrap" to guarantee zero line stripping or truncation.
  */
-export function EventLog({ state }: { state: DashboardState }): React.JSX.Element {
+export function EventLog({
+  state,
+  maxLines = 8,
+}: {
+  state: DashboardState;
+  maxLines?: number;
+}): React.JSX.Element {
+  const visibleLogs = state.log.slice(-maxLines);
+
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1} marginBottom={1}>
-      <Text bold>Event log</Text>
-      {state.log.length === 0 ? (
-        <Text dimColor>(waiting for events…)</Text>
+    <Box
+      flexDirection="column"
+      borderStyle="single"
+      borderColor="gray"
+      paddingX={1}
+    >
+      <Box justifyContent="space-between" marginBottom={0}>
+        <Text bold>AUDIT & TELEMETRY STREAM</Text>
+        <Text dimColor>{state.log.length} TOTAL EVENTS</Text>
+      </Box>
+
+      {visibleLogs.length === 0 ? (
+        <Text dimColor>(waiting for telemetry stream…)</Text>
       ) : (
-        state.log.map((line) => (
-          <Text key={line.id} wrap="truncate-end">
-            {line.text}
-          </Text>
-        ))
+        visibleLogs.map((line: LogLine) => {
+          const color = getLogColor(line.text);
+          return (
+            <Box key={line.id} flexDirection="row">
+              <Box flexShrink={0}>
+                <Text dimColor>
+                  {String(line.id).padStart(2, "0")} │ {line.time} │{" "}
+                </Text>
+              </Box>
+              <Box flexGrow={1}>
+                {color ? (
+                  <Text color={color} wrap="wrap">
+                    {line.text}
+                  </Text>
+                ) : (
+                  <Text wrap="wrap">{line.text}</Text>
+                )}
+              </Box>
+            </Box>
+          );
+        })
       )}
     </Box>
   );
