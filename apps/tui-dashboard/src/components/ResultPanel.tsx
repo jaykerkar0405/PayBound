@@ -20,8 +20,6 @@ export function ResultPanel({ state, width }: { state: DashboardState; width?: n
   const txId = result?.hederaTransactionId;
   const hcsSeq = state.scenarioOutcome?.result?.hcsSequenceNumber ?? state.finalResult?.hcsSequenceNumber;
 
-  const isRejected = state.stages.pay === "failed";
-
   const borderColor = isFailed ? "red" : isSucceeded ? "green" : "gray";
 
   return (
@@ -37,7 +35,7 @@ export function ResultPanel({ state, width }: { state: DashboardState; width?: n
         {isSucceeded ? (
           <Text color="green" bold>[✓ SETTLED]</Text>
         ) : isFailed ? (
-          <Text color="red" bold>{isRejected ? "[✗ REJECTED]" : "[✗ FAILED]"}</Text>
+          <Text color="red" bold>[✗ FAILED]</Text>
         ) : state.phase === "waiting" ? (
           <Text dimColor>[STANDBY]</Text>
         ) : (
@@ -55,9 +53,7 @@ export function ResultPanel({ state, width }: { state: DashboardState; width?: n
       </Box>
       <Box justifyContent="space-between">
         <Text dimColor>Hedera Tx:</Text>
-        <Text bold={Boolean(txId)}>
-          {txId ? txId : isRejected ? "(blocked — 0 HBAR moved)" : "(pending…)"}
-        </Text>
+        <Text bold={Boolean(txId)}>{txId ? txId : "(pending…)"}</Text>
       </Box>
       <Box justifyContent="space-between">
         <Text dimColor>HCS Seq #:</Text>
@@ -69,9 +65,7 @@ export function ResultPanel({ state, width }: { state: DashboardState; width?: n
         {isSucceeded ? (
           <Text color="green" bold>✓ MIRROR CONFIRMED</Text>
         ) : isFailed ? (
-          <Text color="red" bold wrap="truncate-end">
-            ✗ {state.errorMessage ? state.errorMessage.toUpperCase() : "FAILED"}
-          </Text>
+          <Text color="red" bold wrap="truncate-end">✗ {state.errorMessage ? state.errorMessage.slice(0, 20) : "FAILED"}</Text>
         ) : (
           <Text dimColor>● RECONCILING HCS</Text>
         )}
