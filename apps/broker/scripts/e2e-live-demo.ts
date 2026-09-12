@@ -671,7 +671,20 @@ async function runX402PurchaseStage(): Promise<number> {
     console.log(`  Hedera transaction ID: ${result.settlement.transactionId}`);
     console.log(`  View on HashScan: ${hashscanUrl}`);
 
-    const confirmed = await queryHederaMirrorNode(result.settlement.transactionId);
+    let confirmed;
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      try {
+        confirmed = await queryHederaMirrorNode(result.settlement.transactionId);
+        break;
+      } catch (err) {
+        await sleep(2000);
+      }
+    }
+    if (!confirmed) {
+      confirmed = await queryHederaMirrorNode(result.settlement.transactionId);
+    }
+
     console.log(
       `  Independent mirror-node confirmation: outcome=${confirmed.outcome}, status=${confirmed.status}`,
     );
