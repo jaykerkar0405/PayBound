@@ -116,7 +116,7 @@ export async function submitViaX402(
     );
   }
 
-  return { outcome: "settled", transactionId, status: "SUCCESS" };
+  return { outcome: "settled", transactionId, status: "SUCCESS", strategy: "hedera_x402" };
 }
 
 /**

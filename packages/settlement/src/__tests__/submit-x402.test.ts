@@ -114,7 +114,12 @@ describe("submitViaX402", () => {
 
     const result = await submitViaX402(submittedPayment, baseOptions(fetchImpl));
 
-    expect(result).toEqual({ outcome: "settled", transactionId: "0.0.999@1.1", status: "SUCCESS" });
+    expect(result).toEqual({
+      outcome: "settled",
+      transactionId: "0.0.999@1.1",
+      status: "SUCCESS",
+      strategy: "hedera_x402",
+    });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
 
     const secondCallInit = fetchImpl.mock.calls[1]?.[1] as RequestInit | undefined;
@@ -147,6 +152,11 @@ describe("createX402Submitter", () => {
     const submitter = createX402Submitter(baseOptions(fetchImpl));
     const result = await submitter(submittedPayment);
 
-    expect(result).toEqual({ outcome: "settled", transactionId: "0.0.999@2.2", status: "SUCCESS" });
+    expect(result).toEqual({
+      outcome: "settled",
+      transactionId: "0.0.999@2.2",
+      status: "SUCCESS",
+      strategy: "hedera_x402",
+    });
   });
 });
