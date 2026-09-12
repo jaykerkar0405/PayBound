@@ -3,11 +3,15 @@ import { Box, Text } from "ink";
 import type { DashboardState } from "../state.js";
 
 /**
- * Panel 5 — once the run completes, this is set from the `final_result`
- * event and never cleared afterward (see state.ts's reducer — no other
- * event resets `finalResult`), so it stays on screen for the rest of the
- * process's life. This is deliberately the last thing rendered in App.tsx,
- * so it is the last thing on screen when recording stops.
+ * Panel 5 — set from either a `final_result` or an `x402_purchase_result`
+ * event (whichever is chronologically later is what's shown — the x402
+ * purchase stage runs after the original attest->hcs scenario, so its
+ * outcome is the true final state of the run). A later `run_error` clears
+ * `finalResult` so a real failure can't stay masked behind an earlier
+ * latched success (see state.ts's reducer). Otherwise it stays on screen
+ * for the rest of the process's life. This is deliberately the last thing
+ * rendered in App.tsx, so it is the last thing on screen when recording
+ * stops.
  */
 export function ResultPanel({ state }: { state: DashboardState }): React.JSX.Element | null {
   if (state.finalResult) {

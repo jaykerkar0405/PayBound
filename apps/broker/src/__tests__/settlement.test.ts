@@ -143,7 +143,7 @@ describe("settleAndRecord", () => {
       const deps = fakeDeps({
         submitToHedera: vi
           .fn()
-          .mockResolvedValue({ outcome: "settled", transactionId: "0.0.1@1.1", status: "SUCCESS" }),
+          .mockResolvedValue({ outcome: "settled", transactionId: "0.0.1@1.1", status: "SUCCESS", strategy: "hedera_direct" }),
       });
 
       await settleAndRecord(submitted, deps);
@@ -156,6 +156,7 @@ describe("settleAndRecord", () => {
         taskHash: submitted.capability.taskHash,
         hederaTransactionId: "0.0.1@1.1",
         status: "SUCCESS",
+        settlementStrategy: "hedera_direct",
       });
     });
 
@@ -166,6 +167,7 @@ describe("settleAndRecord", () => {
           outcome: "failed",
           transactionId: "0.0.1@1.2",
           status: "INSUFFICIENT_ACCOUNT_BALANCE",
+          strategy: "hedera_direct",
         }),
       });
 
@@ -182,7 +184,7 @@ describe("settleAndRecord", () => {
       const deps = fakeDeps({
         submitToHedera: vi
           .fn()
-          .mockResolvedValue({ outcome: "unknown", transactionId: "0.0.1@1.3", status: null }),
+          .mockResolvedValue({ outcome: "unknown", transactionId: "0.0.1@1.3", status: null, strategy: "hedera_direct" }),
         queryHederaTransactionReceipt: vi
           .fn()
           .mockResolvedValue({ outcome: "settled", transactionId: "0.0.1@1.3", status: "SUCCESS" }),
@@ -202,7 +204,7 @@ describe("settleAndRecord", () => {
       const deps = fakeDeps({
         submitToHedera: vi
           .fn()
-          .mockResolvedValue({ outcome: "unknown", transactionId: "0.0.1@1.4", status: null }),
+          .mockResolvedValue({ outcome: "unknown", transactionId: "0.0.1@1.4", status: null, strategy: "hedera_direct" }),
         queryHederaTransactionReceipt: vi.fn().mockRejectedValue(new Error("still no receipt")),
       });
 
@@ -233,7 +235,7 @@ describe("settleAndRecord", () => {
       const deps = fakeDeps({
         submitToHedera: vi
           .fn()
-          .mockResolvedValue({ outcome: "settled", transactionId: "0.0.1@1.5", status: "SUCCESS" }),
+          .mockResolvedValue({ outcome: "settled", transactionId: "0.0.1@1.5", status: "SUCCESS", strategy: "hedera_direct" }),
         logSettlementOutcome: vi.fn().mockRejectedValue(new Error("HCS topic ID is missing")),
       });
 
@@ -267,7 +269,7 @@ describe("settleAndRecord — Gap 1: hedera_transaction_id persistence", () => {
     const submitted = await setUpSubmitted();
     const txId = "0.0.1@500.0";
     await settleAndRecord(submitted, fakeDeps({
-      submitToHedera: vi.fn().mockResolvedValue({ outcome: "settled", transactionId: txId, status: "SUCCESS" }),
+      submitToHedera: vi.fn().mockResolvedValue({ outcome: "settled", transactionId: txId, status: "SUCCESS", strategy: "hedera_direct" }),
     }));
     expect(hederaTxIdForNonce(submitted.capability.nonce)).toBe(txId);
   });
@@ -276,7 +278,7 @@ describe("settleAndRecord — Gap 1: hedera_transaction_id persistence", () => {
     const submitted = await setUpSubmitted();
     const txId = "0.0.1@501.0";
     await settleAndRecord(submitted, fakeDeps({
-      submitToHedera: vi.fn().mockResolvedValue({ outcome: "unknown", transactionId: txId, status: null }),
+      submitToHedera: vi.fn().mockResolvedValue({ outcome: "unknown", transactionId: txId, status: null, strategy: "hedera_direct" }),
       queryHederaTransactionReceipt: vi.fn().mockRejectedValue(new Error("RECEIPT_NOT_FOUND")),
     }));
     expect(submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
@@ -313,7 +315,7 @@ describe("sweepRecoverablePayments", () => {
     process.env.HEDERA_TESTNET_PRIVATE_KEY = "302e...";
     const submitted = await setUpSubmitted();
     await settleAndRecord(submitted, fakeDeps({
-      submitToHedera: vi.fn().mockResolvedValue({ outcome: "unknown", transactionId: txId, status: null }),
+      submitToHedera: vi.fn().mockResolvedValue({ outcome: "unknown", transactionId: txId, status: null, strategy: "hedera_direct" }),
       queryHederaTransactionReceipt: vi.fn().mockRejectedValue(new Error("RECEIPT_NOT_FOUND")),
     }));
     return submitted;

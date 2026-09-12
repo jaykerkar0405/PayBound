@@ -93,12 +93,14 @@ export async function settleAndRecord(
   let outcome: SubmissionOutcome;
   let transactionId: string | undefined;
   let status: string | undefined;
+  let strategy: HederaSubmissionResult["strategy"] | undefined;
 
   try {
     const result = await deps.submitToHedera(submitted);
     transactionId = result.transactionId;
     status = result.status ?? undefined;
     outcome = result.outcome;
+    strategy = result.strategy;
 
     // Gap 1 fix: persist the transaction ID immediately — before receipt
     // confirmation — so a broker crash/restart can still reconcile this
@@ -134,6 +136,7 @@ export async function settleAndRecord(
         taskHash: submitted.capability.taskHash,
         hederaTransactionId: transactionId,
         status: status ?? outcome,
+        settlementStrategy: strategy ?? "hedera_direct",
       });
     } catch (error) {
       console.error(
