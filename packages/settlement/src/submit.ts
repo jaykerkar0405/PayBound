@@ -18,6 +18,8 @@ export interface HederaSubmissionResult {
   readonly transactionId: string;
   /** The receipt's status string (e.g. "SUCCESS"), or `null` when `outcome` is `"unknown"` — no receipt was ever confirmed. */
   readonly status: string | null;
+  /** Which settlement mechanism produced this result — `"hedera_direct"` (this file) or `"hedera_x402"` (submit-x402.ts). Carried through into `SettlementOutcomeEvent.settlementStrategy` so the HCS audit trail can tell the two apart. */
+  readonly strategy: "hedera_direct" | "hedera_x402";
 }
 
 /**
@@ -59,7 +61,7 @@ export async function submitToHedera(
       .setValidateStatus(false)
       .execute(client);
     const status = receipt.status.toString();
-    return { outcome: status === "SUCCESS" ? "settled" : "failed", transactionId, status };
+    return { outcome: status === "SUCCESS" ? "settled" : "failed", transactionId, status, strategy: "hedera_direct" };
   } catch {
     // Dispatched (we have a real transactionId) but the outcome couldn't
     // be confirmed — a network drop or timeout querying the receipt, not a
@@ -67,7 +69,7 @@ export async function submitToHedera(
     // "unknown" case: reconciliation by transaction ID
     // (queryHederaTransactionReceipt) is the correct next step, not a
     // blind retry.
-    return { outcome: "unknown", transactionId, status: null };
+    return { outcome: "unknown", transactionId, status: null, strategy: "hedera_direct" };
   }
 }
 

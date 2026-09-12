@@ -185,6 +185,7 @@ describe.skipIf(!hasTestnetCredentials)("HCS audit logging — real Hedera Testn
         taskHash: "test-task-hash",
         hederaTransactionId: "0.0.10421552@1788877278.359927796",
         status: "SUCCESS",
+        settlementStrategy: "hedera_direct",
       };
 
       const { transactionId } = await logSettlementOutcome(event);

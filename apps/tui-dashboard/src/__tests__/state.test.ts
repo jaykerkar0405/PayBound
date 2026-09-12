@@ -58,6 +58,7 @@ describe("reduceEvent", () => {
       pay: "done",
       settle: "done",
       hcs: "done",
+      x402_purchase: "pending", // this scenario doesn't run the (separate) x402 purchase stage
     });
     expect(state.phase).toBe("succeeded");
     expect(state.finalResult).toMatchObject({ paid: true, hcsSequenceNumber: 42 });
@@ -89,7 +90,7 @@ describe("reduceEvent", () => {
     expect(state.lastToolCall).toEqual({ capabilityId: "abc-123", timestamp: "t" });
   });
 
-  it("keeps the final result panel populated permanently once set", () => {
+  it("keeps the final result panel populated once set, unless a later run_error overrides it", () => {
     let state = initialState();
     state = reduceEvent(state, {
       type: "final_result",
@@ -99,10 +100,61 @@ describe("reduceEvent", () => {
       hcsSequenceNumber: 1,
       consensusTimestamp: "ts",
     });
-    // No later event clears finalResult once set.
+    // An ordinary later event does not clear finalResult.
     state = reduceEvent(state, { type: "stage", stage: "attest", status: "active" });
     expect(state.finalResult).toBeDefined();
     expect(state.finalResult?.paid).toBe(true);
+  });
+
+  it("lets a later run_error override an earlier latched success, instead of masking the failure", () => {
+    let state = initialState();
+    state = reduceEvent(state, {
+      type: "final_result",
+      paid: true,
+      hederaTransactionId: "tx",
+      status: "SUCCESS",
+      hcsSequenceNumber: 1,
+      consensusTimestamp: "ts",
+    });
+    expect(state.finalResult).toBeDefined();
+
+    state = reduceEvent(state, {
+      type: "run_error",
+      source: "e2e-live-demo",
+      stage: "x402_purchase",
+      message: "x402 purchase failed",
+    });
+
+    expect(state.finalResult).toBeUndefined();
+    expect(state.phase).toBe("failed");
+    expect(state.errorMessage).toBe("x402 purchase failed");
+  });
+
+  it("surfaces a successful x402_purchase_result as the result panel's outcome, not just a log line", () => {
+    let state = initialState();
+    state = reduceEvent(state, {
+      type: "x402_purchase_result",
+      success: true,
+      hederaTransactionId: "0.0.7162784@1789153179.394312180",
+      status: "SUCCESS",
+      hashscanUrl: "https://hashscan.io/testnet/transaction/0.0.7162784@1789153179.394312180",
+    });
+
+    expect(state.phase).toBe("succeeded");
+    expect(state.finalResult).toMatchObject({
+      paid: true,
+      provider: "x402",
+      hederaTransactionId: "0.0.7162784@1789153179.394312180",
+      status: "SUCCESS",
+    });
+    expect(state.log.at(-1)?.text).toContain("0.0.7162784@1789153179.394312180");
+  });
+
+  it("labels the x402_purchase stage correctly instead of printing 'undefined: in progress…'", () => {
+    let state = initialState();
+    state = reduceEvent(state, { type: "stage", stage: "x402_purchase", status: "active" });
+    expect(state.log.at(-1)?.text).toBe("X402: in progress…");
+    expect(state.stages.x402_purchase).toBe("active");
   });
 
   it("caps the event log at the last 10 lines without dropping the most recent ones", () => {

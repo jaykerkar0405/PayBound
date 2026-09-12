@@ -24,7 +24,7 @@
  * feed back into the payment flow.
  */
 
-export type StageId = "attest" | "issue" | "agent" | "pay" | "settle" | "hcs";
+export type StageId = "attest" | "issue" | "agent" | "pay" | "settle" | "hcs" | "x402_purchase";
 export type StageEventStatus = "active" | "done" | "failed";
 
 export type PbEvent =
@@ -55,7 +55,14 @@ export type PbEvent =
       consensusTimestamp: string;
       hashscanUrl?: string;
     }
-  | { type: "run_error"; source: string; stage?: string; message: string };
+  | { type: "run_error"; source: string; stage?: string; message: string }
+  | {
+      type: "x402_purchase_result";
+      success: boolean;
+      hederaTransactionId: string;
+      status: string;
+      hashscanUrl: string;
+    };
 
 const EVENT_MARKER = "PB_TUI_EVENT";
 
@@ -72,6 +79,7 @@ const KNOWN_TYPES: ReadonlySet<PbEvent["type"]> = new Set([
   "mirror_confirmed",
   "final_result",
   "run_error",
+  "x402_purchase_result",
 ]);
 
 /**
