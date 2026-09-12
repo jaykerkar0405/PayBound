@@ -1,23 +1,77 @@
-// PLACEHOLDER — implemented in Phase 2 (Issue #98).
-//
-// Will register a `cre.handlerInTee` confidential-workflow HTTP handler that
-// fetches SPEND_CAPS_JSON inside the enclave and evaluates the spend-cap
-// decision the broker's checkSpendPolicy() (apps/broker/src/cre-policy.ts)
-// currently stubs. Split out from main.ts — matching the real
-// hello-confidential-workflows-ts template's structure — so this logic can
-// be unit tested without executing Runner.newRunner(), which requires the
-// real CRE WASM host and throws outside it.
-import type { HTTPPayload, TeeRuntime } from "@chainlink/cre-sdk"
+import { cre, decodeJson, type HTTPPayload, type TeeRuntime } from "@chainlink/cre-sdk"
+import { z } from "zod"
 
-type Config = Record<string, never>
+// ─── Config Schema ──────────────────────────────────────────
+// This workflow has no build-time config — the spend caps themselves live
+// in the SPEND_CAPS secret (see ../secrets.yaml), fetched inside the
+// enclave. The minimal schema Runner.newRunner({ configSchema }) actually
+// requires is an empty object, matching config.staging.json.
+export const configSchema = z.object({})
+type Config = z.infer<typeof configSchema>
 
-export const onHttpTrigger = (
-  _runtime: TeeRuntime<Config>,
-  _payload: HTTPPayload,
-): string => {
-  throw new Error("not implemented")
+interface SpendCheckRequest {
+  resourceId: string
+  exactAmount: string
 }
 
+// ─── TEE HTTP Callback ──────────────────────────────────────
+// Receives a `TeeRuntime`, not a `Runtime`. Everything here runs inside the
+// enclave — matches the wire format the broker's checkSpendPolicy() sends
+// and expects (apps/broker/src/cre-policy.ts L91-96 request, L105-117
+// response).
+export const onHttpTrigger = (runtime: TeeRuntime<Config>, payload: HTTPPayload): string => {
+  const request = decodeJson(payload.input) as SpendCheckRequest
+  if (!request.resourceId || !request.exactAmount) {
+    return JSON.stringify({
+      allowed: false,
+      reason: "Missing resourceId or exactAmount",
+    })
+  }
+
+  // ── Fetch the spend-caps secret inside the enclave ──
+  // The Vault DON releases this secret only into an attested enclave, and
+  // it is decrypted at the moment `getSecret()` runs. Never logged in full.
+  const capsSecret = runtime.getSecret({ id: "SPEND_CAPS" }).result()
+  const caps: Record<string, string> = JSON.parse(capsSecret.value)
+
+  // Three-tier fallback: exact resourceId match -> "default" key -> if
+  // neither exists, permissively allow (no cap configured for this resource).
+  const capStr = caps[request.resourceId] ?? caps["default"]
+  if (!capStr) {
+    return JSON.stringify({
+      allowed: true,
+      reason: "No spend cap defined for resource",
+    })
+  }
+
+  const amount = parseFloat(request.exactAmount)
+  const cap = parseFloat(capStr)
+  const allowed = amount <= cap
+
+  // ⚠️ Logs are for simulation only and MUST be removed before deploying to
+  // production to preserve the confidentiality offered by enclaves. Note
+  // this never logs the caps table or the secret value itself.
+  runtime.log(
+    `Spend check: resource=${request.resourceId} amount=${amount} cap=${cap} → ${allowed ? "ALLOW" : "DENY"}`,
+  )
+
+  return JSON.stringify({
+    allowed,
+    reason: allowed
+      ? "CRE policy: allowed"
+      : `CRE policy: spend cap exceeded (requested ${request.exactAmount}, cap ${capStr})`,
+  })
+}
+
+// ─── Workflow Init ──────────────────────────────────────────
 export const initWorkflow = (_config: Config) => {
-  throw new Error("not implemented")
+  const http = new cre.capabilities.HTTPCapability()
+
+  return [
+    // ── Register a TEE handler ──
+    // `cre.handlerInTee` instead of `cre.handler` — this is the literal
+    // prize requirement. `{}` as the TeeConstraint means any registered
+    // TEE, any region (AWS Nitro in us-west-2 is currently the only one).
+    cre.handlerInTee(http.trigger({}), onHttpTrigger, {}),
+  ]
 }
