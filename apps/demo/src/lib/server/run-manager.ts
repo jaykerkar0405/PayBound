@@ -42,7 +42,7 @@ interface RunRecord {
   status: RunStatus;
   exitCode: number | null;
   readonly lines: string[];
-  readonly listeners: Set<(line: string) => void>;
+  readonly listeners: Set<(line: string, index: number) => void>;
   readonly doneListeners: Set<() => void>;
   child?: ChildProcess;
   finishedAt?: number;
@@ -61,7 +61,8 @@ function pruneOldRuns(): void {
 
 function appendLine(run: RunRecord, line: string): void {
   run.lines.push(line);
-  for (const listener of run.listeners) listener(line);
+  const index = run.lines.length - 1;
+  for (const listener of run.listeners) listener(line, index);
 }
 
 function finish(run: RunRecord, status: RunStatus, exitCode: number | null): void {
@@ -178,19 +179,30 @@ export function getRunSnapshot(id: string): RunSnapshot | undefined {
 
 /**
  * Subscribes to a run's future lines and completion, AFTER first replaying
- * everything already buffered — so a browser tab that connects a moment
- * after the run started (or reconnects) sees the full history, not just
- * what happens to arrive after it joins. Returns an unsubscribe function.
+ * whatever's buffered from `fromIndex` onward — so a browser tab that
+ * connects a moment after the run started sees the full history (fromIndex
+ * 0, the default), while a tab RECONNECTING after an idle-timeout drop
+ * (see the SSE route's `Last-Event-ID` handling) resumes only what it
+ * hasn't already seen, instead of replaying the entire run from scratch.
+ * A full replay on every reconnect used to re-feed already-processed
+ * stage/log events back through the client's reducer — visible as the
+ * pipeline stepper's stage count and the activity log both flickering
+ * backward briefly before catching back up, since a live process's
+ * genuinely silent stretches (e.g. the ~60s Hedera mirror-node settlement
+ * poll below emitting nothing per attempt) reliably outlast most
+ * reverse-proxy idle-connection timeouts, and the browser's EventSource
+ * auto-reconnects on that silently. Returns an unsubscribe function.
  */
 export function subscribeToRun(
   id: string,
-  onLine: (line: string) => void,
+  onLine: (line: string, index: number) => void,
   onDone: () => void,
+  fromIndex = 0,
 ): (() => void) | undefined {
   const run = runs.get(id);
   if (!run) return undefined;
 
-  for (const line of run.lines) onLine(line);
+  for (let i = fromIndex; i < run.lines.length; i++) onLine(run.lines[i] as string, i);
   if (run.status !== "running") {
     onDone();
     return () => {};
