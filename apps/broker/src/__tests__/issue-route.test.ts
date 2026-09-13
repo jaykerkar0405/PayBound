@@ -22,9 +22,9 @@ async function postPay(body: unknown) {
 }
 
 /** Seeds one registry entry and returns its resourceId + price. */
-function seedOne(price = "10.00") {
+async function seedOne(price = "10.00") {
   const resourceId = randomUUID();
-  seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price }]);
+  await seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price }]);
   return { resourceId, price };
 }
 
@@ -34,10 +34,10 @@ function seedOne(price = "10.00") {
  * this helper the same taskHash, which (since the resourceId is always
  * freshly randomized via seedOne()) would collide with the
  * one-resource-per-task check across repeated runs against the same
- * persistent broker.db file, not just within a single run.
+ * shared, persistent Postgres database, not just within a single run.
  */
-function validBody(overrides: Partial<Record<string, unknown>> = {}) {
-  const { resourceId, price } = seedOne();
+async function validBody(overrides: Partial<Record<string, unknown>> = {}) {
+  const { resourceId, price } = await seedOne();
   return {
     taskDefinition: { description: "test task", nonce: randomUUID() },
     resourceId,
@@ -50,7 +50,7 @@ function validBody(overrides: Partial<Record<string, unknown>> = {}) {
 
 describe("POST /issue", () => {
   it("returns 200 with capabilityId and expiry for a valid request", async () => {
-    const res = await postIssue(validBody());
+    const res = await postIssue(await validBody());
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { capabilityId: string; expiry: string };
@@ -79,7 +79,7 @@ describe("POST /issue", () => {
   });
 
   it("returns 422 with price_mismatch when exactAmount doesn't match the registry price", async () => {
-    const { resourceId } = seedOne("10.00");
+    const { resourceId } = await seedOne("10.00");
     const res = await postIssue({
       taskDefinition: { description: "test" },
       resourceId,
@@ -104,7 +104,7 @@ describe("POST /issue", () => {
   });
 
   it("returns 400 with invalid_request when resourceId is not a valid UUID string", async () => {
-    const { price } = seedOne();
+    const { price } = await seedOne();
     const res = await postIssue({
       taskDefinition: {},
       resourceId: 12345, // wrong type
@@ -121,7 +121,7 @@ describe("POST /issue", () => {
 
 describe("POST /issue — task budget creation (task 6.x)", () => {
   it("creates a task budget synchronously, so the issued capability can immediately be paid end-to-end", async () => {
-    const body = validBody();
+    const body = await validBody();
 
     const issueRes = await postIssue(body);
     expect(issueRes.status).toBe(200);
@@ -136,10 +136,10 @@ describe("POST /issue — task budget creation (task 6.x)", () => {
   });
 
   it("a second /issue for the same task definition succeeds without re-creating or erroring, issuing against the already-funded task", async () => {
-    const { resourceId, price } = seedOne("10.00");
+    const { resourceId, price } = await seedOne("10.00");
     // Unique per test run: a fixed literal here would collide with
     // leftover DB state from a prior run of this same test against the
-    // shared broker.db file (taskHash is a content hash, so identical
+    // shared Postgres database (taskHash is a content hash, so identical
     // content always hashes to the same taskHash).
     const taskDefinition = { description: "shared task, issued against twice", nonce: randomUUID() };
     const body = {
@@ -165,7 +165,7 @@ describe("POST /issue — task budget creation (task 6.x)", () => {
     expect(secondCapabilityId).not.toBe(firstCapabilityId);
 
     const taskHash = hashCanonical(taskDefinition);
-    const task = getTask(taskHash);
+    const task = await getTask(taskHash);
     expect(task).toBeDefined();
     // The budget is exactly one resource's price, not doubled/re-funded
     // by the second /issue call.
@@ -201,8 +201,8 @@ describe("POST /issue — one resource per task (task 6.x follow-up)", () => {
    */
   it("rejects a second /issue for the same taskDefinition naming a DIFFERENT resourceId, before issuing anything (A=10 first, B=25 second)", async () => {
     const taskDefinition = { scenario: "A-then-B", nonce: randomUUID() };
-    const { resourceId: resourceA } = seedOne("10.00");
-    const { resourceId: resourceB } = seedOne("25.00");
+    const { resourceId: resourceA } = await seedOne("10.00");
+    const { resourceId: resourceB } = await seedOne("25.00");
 
     const issueA = await postIssue({
       taskDefinition,
@@ -230,7 +230,7 @@ describe("POST /issue — one resource per task (task 6.x follow-up)", () => {
     // No orphan capability was issued for the rejected request: B's
     // exactAmount never even reached issueCapability().
     const taskHash = hashCanonical(taskDefinition);
-    const task = getTask(taskHash);
+    const task = await getTask(taskHash);
     expect(task?.maxTotalSpend).toBe("10.00");
 
     // A, the capability that actually established the binding, is
@@ -244,8 +244,8 @@ describe("POST /issue — one resource per task (task 6.x follow-up)", () => {
   /** Same scenario, reversed order: confirms the check isn't A/B-specific — whichever resource issues first wins the binding, and the other is rejected regardless of which is more/less expensive. */
   it("rejects a second /issue for the same taskDefinition naming a DIFFERENT resourceId, reverse order (B=25 first, A=10 second)", async () => {
     const taskDefinition = { scenario: "B-then-A", nonce: randomUUID() };
-    const { resourceId: resourceA } = seedOne("10.00");
-    const { resourceId: resourceB } = seedOne("25.00");
+    const { resourceId: resourceA } = await seedOne("10.00");
+    const { resourceId: resourceB } = await seedOne("25.00");
 
     const issueB = await postIssue({
       taskDefinition,
@@ -269,13 +269,13 @@ describe("POST /issue — one resource per task (task 6.x follow-up)", () => {
     expect(issueABody.error).toBe("task_resource_mismatch");
 
     const taskHash = hashCanonical(taskDefinition);
-    const task = getTask(taskHash);
+    const task = await getTask(taskHash);
     expect(task?.maxTotalSpend).toBe("25.00");
   });
 
   it("allows a second /issue for the same taskDefinition naming the SAME resourceId (no regression to the existing shared-task path)", async () => {
     const taskDefinition = { scenario: "same-resource-twice", nonce: randomUUID() };
-    const { resourceId } = seedOne("10.00");
+    const { resourceId } = await seedOne("10.00");
 
     const first = await postIssue({
       taskDefinition,

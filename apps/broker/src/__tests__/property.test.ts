@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { PaymentAuthorizationRequest } from "@paybound/capability-spec";
 import { app } from "../index.js";
-import { db } from "../db.js";
+import { pool } from "../db.js";
 import { seedRegistry } from "../registry.js";
 import { createTask, getTask } from "../budget.js";
 import { issueCapability, getCapabilityRecord } from "../issuer.js";
@@ -40,7 +40,7 @@ async function postPay(capabilityId: unknown) {
   });
 }
 
-function setUpCapabilityRecord(
+async function setUpCapabilityRecord(
   overrides: { price?: string; maxTotalSpend?: string; session?: string } = {},
 ) {
   const taskDefinition = { id: randomUUID() };
@@ -49,10 +49,10 @@ function setUpCapabilityRecord(
   const price = overrides.price ?? "10.00";
   const session = overrides.session ?? "sandbox-public-key";
 
-  seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price }]);
-  createTask(realTaskHash, overrides.maxTotalSpend ?? "100.00");
+  await seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price }]);
+  await createTask(realTaskHash, overrides.maxTotalSpend ?? "100.00");
 
-  const issued = issueCapability({
+  const issued = await issueCapability({
     taskDefinition,
     resourceId,
     exactAmount: price,
@@ -60,9 +60,9 @@ function setUpCapabilityRecord(
     session,
   });
 
-  const record = getCapabilityRecord(issued.capabilityId);
+  const record = await getCapabilityRecord(issued.capabilityId);
   if (record === undefined) throw new Error("expected capability record to exist");
-  const task = getTask(realTaskHash);
+  const task = await getTask(realTaskHash);
   if (task === undefined) throw new Error("expected task to exist");
 
   const validPayment: PaymentAuthorizationRequest = {
@@ -77,16 +77,16 @@ function setUpCapabilityRecord(
   return { capability: record.capability, task, validPayment, capabilityId: issued.capabilityId };
 }
 
-function expireCapability(capabilityId: string) {
-  db.prepare("UPDATE capabilities SET expiry = ? WHERE capability_id = ?").run(
+async function expireCapability(capabilityId: string) {
+  await pool.query("UPDATE capabilities SET expiry = $1 WHERE capability_id = $2", [
     new Date(Date.now() - 60_000).toISOString(),
     capabilityId,
-  );
+  ]);
 }
 
 describe("property: replay", () => {
   it("paying the same capabilityId a second time returns REPLAY, not a generic failure", async () => {
-    const { capabilityId } = setUpCapabilityRecord();
+    const { capabilityId } = await setUpCapabilityRecord();
 
     const first = await postPay(capabilityId);
     expect(first.status).toBe(200);
@@ -105,11 +105,11 @@ describe("property: substitution", () => {
   // clause is mostly a backstop against a compromised or buggy Broker
   // construction path, not against the agent itself," since pay()'s own
   // construction always copies `destination` from the looked-up capability.
-  it("payment.destination !== capability.recipient returns SUBSTITUTION", () => {
-    const { capability, task, validPayment } = setUpCapabilityRecord();
+  it("payment.destination !== capability.recipient returns SUBSTITUTION", async () => {
+    const { capability, task, validPayment } = await setUpCapabilityRecord();
     const payment = { ...validPayment, destination: "0xATTACKER" };
 
-    expect(authorize({ payment, capability, task })).toEqual({
+    expect(await authorize({ payment, capability, task })).toEqual({
       authorized: false,
       reason: "SUBSTITUTION",
     });
@@ -128,11 +128,11 @@ describe("property: resource mismatch (task 1.8's 'escalation' case)", () => {
   // substitution above: pay()'s own construction always copies `resource`
   // from the looked-up capability, so this is unreachable via the real
   // HTTP request body.
-  it("payment.resource !== capability.resourceId returns RESOURCE_MISMATCH", () => {
-    const { capability, task, validPayment } = setUpCapabilityRecord();
+  it("payment.resource !== capability.resourceId returns RESOURCE_MISMATCH", async () => {
+    const { capability, task, validPayment } = await setUpCapabilityRecord();
     const payment = { ...validPayment, resource: randomUUID() };
 
-    expect(authorize({ payment, capability, task })).toEqual({
+    expect(await authorize({ payment, capability, task })).toEqual({
       authorized: false,
       reason: "RESOURCE_MISMATCH",
     });
@@ -141,8 +141,8 @@ describe("property: resource mismatch (task 1.8's 'escalation' case)", () => {
 
 describe("property: stale nonce", () => {
   it("paying an expired capability returns STALE_NONCE via the real HTTP endpoint", async () => {
-    const { capabilityId } = setUpCapabilityRecord();
-    expireCapability(capabilityId);
+    const { capabilityId } = await setUpCapabilityRecord();
+    await expireCapability(capabilityId);
 
     const res = await postPay(capabilityId);
 
@@ -156,11 +156,11 @@ describe("property: session mismatch", () => {
   // copies `session` from the looked-up capability, so this mismatch is
   // unreachable via the real HTTP request body (the same "backstop, not
   // an agent-facing path" reasoning as substitution above).
-  it("payment.session !== capability.session returns SESSION_MISMATCH", () => {
-    const { capability, task, validPayment } = setUpCapabilityRecord();
+  it("payment.session !== capability.session returns SESSION_MISMATCH", async () => {
+    const { capability, task, validPayment } = await setUpCapabilityRecord();
     const payment = { ...validPayment, session: "a-different-session-key" };
 
-    expect(authorize({ payment, capability, task })).toEqual({
+    expect(await authorize({ payment, capability, task })).toEqual({
       authorized: false,
       reason: "SESSION_MISMATCH",
     });
@@ -170,11 +170,11 @@ describe("property: session mismatch", () => {
 describe("property: task_hash mismatch", () => {
   // Tested via authorize() directly, for the same reason as session
   // mismatch above.
-  it("payment.taskHash !== capability.taskHash returns TASK_HASH_MISMATCH", () => {
-    const { capability, task, validPayment } = setUpCapabilityRecord();
+  it("payment.taskHash !== capability.taskHash returns TASK_HASH_MISMATCH", async () => {
+    const { capability, task, validPayment } = await setUpCapabilityRecord();
     const payment = { ...validPayment, taskHash: randomUUID() };
 
-    expect(authorize({ payment, capability, task })).toEqual({
+    expect(await authorize({ payment, capability, task })).toEqual({
       authorized: false,
       reason: "TASK_HASH_MISMATCH",
     });
@@ -186,11 +186,11 @@ describe("property: amount mismatch", () => {
   // included for full invariant coverage, per this suite's stated
   // purpose. Tested via authorize() directly, for the same reason as the
   // other field-matching clauses above.
-  it("payment.amount !== capability.exactAmount returns AMOUNT_MISMATCH", () => {
-    const { capability, task, validPayment } = setUpCapabilityRecord();
+  it("payment.amount !== capability.exactAmount returns AMOUNT_MISMATCH", async () => {
+    const { capability, task, validPayment } = await setUpCapabilityRecord();
     const payment = { ...validPayment, amount: "999999.00" };
 
-    expect(authorize({ payment, capability, task })).toEqual({
+    expect(await authorize({ payment, capability, task })).toEqual({
       authorized: false,
       reason: "AMOUNT_MISMATCH",
     });
@@ -203,11 +203,11 @@ describe("property: request forgery", () => {
   // directly, for the same reason as the other field-matching clauses
   // above. destination/amount are left unchanged so this is distinctly a
   // request-forgery case, not a substitution case.
-  it("payment.paymentRequestHash !== capability.paymentRequestHash returns REQUEST_FORGERY", () => {
-    const { capability, task, validPayment } = setUpCapabilityRecord();
+  it("payment.paymentRequestHash !== capability.paymentRequestHash returns REQUEST_FORGERY", async () => {
+    const { capability, task, validPayment } = await setUpCapabilityRecord();
     const payment = { ...validPayment, paymentRequestHash: randomUUID() };
 
-    expect(authorize({ payment, capability, task })).toEqual({
+    expect(await authorize({ payment, capability, task })).toEqual({
       authorized: false,
       reason: "REQUEST_FORGERY",
     });
@@ -220,20 +220,22 @@ describe("property: concurrent double-spend on the same task budget", () => {
   it("of 5 concurrently paid capabilities against a task with room for exactly one, exactly one succeeds and the other 4 return BUDGET_EXCEEDED", async () => {
     const taskDefinition = { scenario: "concurrent-double-spend", id: randomUUID() };
     const realTaskHash = hashCanonical(taskDefinition);
-    createTask(realTaskHash, "10");
+    await createTask(realTaskHash, "10");
 
-    const capabilityIds = Array.from({ length: 5 }, () => {
-      const resourceId = randomUUID();
-      seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price: "10" }]);
-      const issued = issueCapability({
-        taskDefinition,
-        resourceId,
-        exactAmount: "10",
-        paymentRequest: { detail: "concurrent-double-spend" },
-        session: "sandbox-public-key",
-      });
-      return issued.capabilityId;
-    });
+    const capabilityIds = await Promise.all(
+      Array.from({ length: 5 }, async () => {
+        const resourceId = randomUUID();
+        await seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price: "10" }]);
+        const issued = await issueCapability({
+          taskDefinition,
+          resourceId,
+          exactAmount: "10",
+          paymentRequest: { detail: "concurrent-double-spend" },
+          session: "sandbox-public-key",
+        });
+        return issued.capabilityId;
+      }),
+    );
 
     const responses = await Promise.all(capabilityIds.map((capabilityId) => postPay(capabilityId)));
     const bodies = (await Promise.all(responses.map((res) => res.json()))) as Array<
@@ -249,6 +251,37 @@ describe("property: concurrent double-spend on the same task budget", () => {
 
     expect(successes).toHaveLength(1);
     expect(budgetExceeded).toHaveLength(4);
+  });
+});
+
+describe("property: concurrent double-spend on the SAME capability (replay race)", () => {
+  // Distinct from the budget test above, which uses 5 DIFFERENT
+  // capabilities sharing one task budget (exercising the `tasks` row's
+  // FOR UPDATE lock). This test uses the SAME capability_id 5 times,
+  // exercising the `capabilities` row's own FOR UPDATE lock in
+  // reservePayment — the literal "replay" race: without that lock, two
+  // concurrent requests could both observe `consumed = 0` before either
+  // writes `consumed = 1`, and both would be authorized. Added
+  // specifically because the existing budget test does not exercise this
+  // path at all (it never reuses a capability_id) — reasoning that the
+  // lock is correct isn't the same as testing that it is.
+  it("of 5 concurrent pay() calls for the same capability_id, exactly one succeeds and the other 4 return REPLAY", async () => {
+    const { capabilityId } = await setUpCapabilityRecord();
+
+    const responses = await Promise.all(Array.from({ length: 5 }, () => postPay(capabilityId)));
+    const bodies = (await Promise.all(responses.map((res) => res.json()))) as Array<
+      { state: { status: string } } | { authorized: false; reason: string }
+    >;
+
+    const successes = bodies.filter(
+      (body): body is { state: { status: string } } => "state" in body && body.state.status === "SUBMITTED",
+    );
+    const replays = bodies.filter(
+      (body) => "authorized" in body && body.authorized === false && body.reason === "REPLAY",
+    );
+
+    expect(successes).toHaveLength(1);
+    expect(replays).toHaveLength(4);
   });
 });
 

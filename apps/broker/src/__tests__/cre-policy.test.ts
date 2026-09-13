@@ -220,8 +220,8 @@ describe("POST /issue — CRE integration", () => {
   it("returns 200 when CRE is disabled (CRE_ENABLED unset) — issuance unaffected", async () => {
     delete process.env.CRE_ENABLED;
     const resourceId = randomUUID();
-    seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price: "10.00" }]);
-    createTask(hashCanonical(randomUUID()), "100.00");
+    await seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price: "10.00" }]);
+    await createTask(hashCanonical(randomUUID()), "100.00");
 
     const res = await app.request("/issue", {
       method: "POST",
@@ -236,8 +236,8 @@ describe("POST /issue — CRE integration", () => {
     process.env.CRE_ENABLED = "true";
     process.env.CRE_GATEWAY_URL = "http://127.0.0.1:19999/policy"; // nothing listening here
     const resourceId = randomUUID();
-    seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price: "10.00" }]);
-    createTask(hashCanonical(randomUUID()), "100.00");
+    await seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price: "10.00" }]);
+    await createTask(hashCanonical(randomUUID()), "100.00");
 
     const res = await app.request("/issue", {
       method: "POST",

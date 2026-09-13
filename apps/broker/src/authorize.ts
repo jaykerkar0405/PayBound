@@ -21,7 +21,7 @@ import { getCapabilityIdByNonce, reservePayment } from "./state-machine.js";
  * discarded — callers (e.g. the pay() route, task 1.7) use it directly
  * instead of reconstructing an equivalent value from a second lookup.
  */
-export function authorize(input: AuthorizePaymentInput): AuthorizationResult {
+export async function authorize(input: AuthorizePaymentInput): Promise<AuthorizationResult> {
   const { payment, capability, task } = input;
 
   if (payment.amount !== capability.exactAmount) {
@@ -43,12 +43,12 @@ export function authorize(input: AuthorizePaymentInput): AuthorizationResult {
     return { authorized: false, reason: "REQUEST_FORGERY" };
   }
 
-  const capabilityId = getCapabilityIdByNonce(capability.nonce);
+  const capabilityId = await getCapabilityIdByNonce(capability.nonce);
   if (capabilityId === undefined) {
     throw new Error(`authorize: no issued capability record found for nonce "${capability.nonce}"`);
   }
 
-  const reservation = reservePayment(capabilityId, task.taskHash, payment.amount);
+  const reservation = await reservePayment(capabilityId, task.taskHash, payment.amount);
   if (!reservation.ok) {
     return { authorized: false, reason: reservation.reason };
   }
