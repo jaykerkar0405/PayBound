@@ -114,7 +114,7 @@ issueRoute.post(
     // leaves behind an orphan, never-payable capability. See this file's
     // top doc comment for the full reasoning.
     const taskHash = hashCanonical(taskDefinition);
-    const boundResourceId = getTaskResourceId(taskHash);
+    const boundResourceId = await getTaskResourceId(taskHash);
     if (boundResourceId !== undefined && boundResourceId !== null && boundResourceId !== resourceId) {
       return c.json(
         {
@@ -129,7 +129,7 @@ issueRoute.post(
     }
 
     try {
-      const result = issueCapability({
+      const result = await issueCapability({
         taskDefinition,
         resourceId,
         exactAmount,
@@ -140,21 +140,21 @@ issueRoute.post(
       // Task budget creation (task 6.x) — see this file's top doc comment
       // for the full reasoning. Read back the just-persisted record rather
       // than trusting request-body fields directly.
-      const record = getCapabilityRecord(result.capabilityId);
+      const record = await getCapabilityRecord(result.capabilityId);
       if (record === undefined) {
         throw new Error(
           `POST /issue: capability "${result.capabilityId}" was just issued but getCapabilityRecord found no record for it`,
         );
       }
 
-      if (getTask(record.capability.taskHash) === undefined) {
-        const resource = getResourceById(record.capability.resourceId);
+      if ((await getTask(record.capability.taskHash)) === undefined) {
+        const resource = await getResourceById(record.capability.resourceId);
         if (resource === undefined) {
           throw new Error(
             `POST /issue: issueCapability() succeeded for resourceId "${record.capability.resourceId}" but getResourceById found no registry entry for it`,
           );
         }
-        createTask(record.capability.taskHash, resource.price, record.capability.resourceId);
+        await createTask(record.capability.taskHash, resource.price, record.capability.resourceId);
       }
 
       return c.json({ capabilityId: result.capabilityId, expiry: result.expiry }, 200);

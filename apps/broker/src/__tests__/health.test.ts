@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { app } from "../index.js";
-import { db } from "../db.js";
+import { pool } from "../db.js";
 
 describe("GET /health", () => {
   it("returns 200 with { status: 'ok' } when no query params are given", async () => {
@@ -28,7 +28,8 @@ describe("GET /health", () => {
 });
 
 describe("db", () => {
-  it("exposes a usable better-sqlite3 Database in WAL mode", () => {
-    expect(db.pragma("journal_mode", { simple: true })).toBe("wal");
+  it("exposes a usable, connected Postgres pool", async () => {
+    const result = await pool.query("SELECT 1 AS one");
+    expect(result.rows[0]).toEqual({ one: 1 });
   });
 });

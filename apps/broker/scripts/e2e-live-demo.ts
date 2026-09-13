@@ -22,8 +22,8 @@
  *    `hcsEventSchema` from `@paybound/settlement` — the exact same
  *    reconciliation code path the Broker's own crash-recovery sweep
  *    uses (settlement.ts's `sweepRecoverablePayments`) — rather than
- *    trusting the Broker's own console [AUDIT] lines or reading
- *    broker.db directly. Everything this script reports as "confirmed"
+ *    trusting the Broker's own console [AUDIT] lines or reading its
+ *    database directly. Everything this script reports as "confirmed"
  *    is independently re-derived from the public Hedera Testnet mirror
  *    node, the same source an outside observer (a demo judge) could
  *    query themselves with nothing but the topic ID and a transaction ID.
@@ -72,7 +72,7 @@ import path from "node:path";
 import { hcsEventSchema, queryHederaMirrorNode, requireTopicId } from "@paybound/settlement";
 import { config as brokerConfig } from "../src/config.js";
 import { isSettlementConfigured } from "../src/settlement.js";
-import { db } from "../src/db.js";
+import { pool } from "../src/db.js";
 import { ensureSeeded, LIVE_AGENT_RUN_PRICE, LIVE_AGENT_RUN_RESOURCE_ID } from "./seed-live-agent-run.js";
 import { payForGatedContent } from "./pay-for-gated-content.js";
 
@@ -480,36 +480,35 @@ function extractRejectionReason(output: string): string | undefined {
   return undefined;
 }
 
-function seedAttackerReplayedCapability(taskHash: string): void {
+async function seedAttackerReplayedCapability(taskHash: string): Promise<void> {
   const recipient = process.env.HEDERA_TESTNET_ACCOUNT_ID ?? "0.0.10421552";
   const nonce = `replayed-nonce-${ATTACKER_CAPABILITY_ID}`;
   const expiry = new Date(Date.now() + 3600_000).toISOString();
 
-  const stmt = db.prepare(`
-    INSERT INTO capabilities (
+  await pool.query(
+    `INSERT INTO capabilities (
       capability_id, task_hash, resource_id, recipient, exact_amount,
       payment_request_hash, session, nonce, expiry, max_uses, signature, consumed
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-    ON CONFLICT(capability_id) DO UPDATE SET
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1)
+    ON CONFLICT (capability_id) DO UPDATE SET
       task_hash = excluded.task_hash,
       resource_id = excluded.resource_id,
       recipient = excluded.recipient,
       exact_amount = excluded.exact_amount,
-      consumed = 1
-  `);
-
-  stmt.run(
-    ATTACKER_CAPABILITY_ID,
-    taskHash,
-    LIVE_AGENT_RUN_RESOURCE_ID,
-    recipient,
-    LIVE_AGENT_RUN_PRICE,
-    "0000000000000000000000000000000000000000000000000000000000000000",
-    "",
-    nonce,
-    expiry,
-    1,
-    "stub-signature",
+      consumed = 1`,
+    [
+      ATTACKER_CAPABILITY_ID,
+      taskHash,
+      LIVE_AGENT_RUN_RESOURCE_ID,
+      recipient,
+      LIVE_AGENT_RUN_PRICE,
+      "0000000000000000000000000000000000000000000000000000000000000000",
+      "",
+      nonce,
+      expiry,
+      1,
+      "stub-signature",
+    ],
   );
   console.log(`  Seeded replayed capability ${ATTACKER_CAPABILITY_ID} (consumed = 1) for adversarial invariant check.`);
 }
@@ -558,14 +557,14 @@ async function runAdversarialScenarioDemo(): Promise<number> {
   await preflight(brokerUrl);
 
   stage(2, TOTAL_STAGES, "Seeding task/registry entry and ensuring ample demo-rehearsal budget...");
-  const { taskHash } = ensureSeeded();
+  const { taskHash } = await ensureSeeded();
   console.log(`  Task hash: ${taskHash}`);
   console.log(`  Price per run: ${LIVE_AGENT_RUN_PRICE} HBAR`);
   emitEvent({ type: "task_seeded", taskHash, price: LIVE_AGENT_RUN_PRICE });
 
   const isAdversarialScenario = scenario.name === "hijack" || scenario.name === "fake-capability";
   if (isAdversarialScenario) {
-    seedAttackerReplayedCapability(taskHash);
+    await seedAttackerReplayedCapability(taskHash);
   }
 
   stage(3, TOTAL_STAGES, `Serving untrusted content — scenario "${scenario.name}": ${scenario.label}`);

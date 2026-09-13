@@ -1,21 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { db } from "../db.js";
+import { pool } from "../db.js";
 import { seedRegistry } from "../registry.js";
 import { issueCapability } from "../issuer.js";
 import { createTask } from "../budget.js";
 import { hashCanonical } from "../hash.js";
 import { reservePayment, submitPayment, resolveSubmission } from "../state-machine.js";
 
-function setUpCapability(overrides: { maxTotalSpend?: string; price?: string } = {}) {
+async function setUpCapability(overrides: { maxTotalSpend?: string; price?: string } = {}) {
   const taskHash = hashCanonical(randomUUID());
   const resourceId = randomUUID();
   const price = overrides.price ?? "10.00";
 
-  seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price }]);
-  createTask(taskHash, overrides.maxTotalSpend ?? "100.00");
+  await seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price }]);
+  await createTask(taskHash, overrides.maxTotalSpend ?? "100.00");
 
-  const issued = issueCapability({
+  const issued = await issueCapability({
     taskDefinition: { taskHash },
     resourceId,
     exactAmount: price,
@@ -26,18 +26,26 @@ function setUpCapability(overrides: { maxTotalSpend?: string; price?: string } =
   return { taskHash, resourceId, price, capabilityId: issued.capabilityId };
 }
 
-function expireCapability(capabilityId: string) {
-  db.prepare("UPDATE capabilities SET expiry = ? WHERE capability_id = ?").run(
+async function expireCapability(capabilityId: string) {
+  await pool.query("UPDATE capabilities SET expiry = $1 WHERE capability_id = $2", [
     new Date(Date.now() - 60_000).toISOString(),
     capabilityId,
+  ]);
+}
+
+async function consumedFlag(capabilityId: string): Promise<number | undefined> {
+  const result = await pool.query<{ consumed: number }>(
+    "SELECT consumed FROM capabilities WHERE capability_id = $1",
+    [capabilityId],
   );
+  return result.rows[0]?.consumed;
 }
 
 describe("reservePayment", () => {
-  it("succeeds for a freshly issued, unexpired, unconsumed capability with sufficient budget", () => {
-    const { taskHash, price, capabilityId } = setUpCapability();
+  it("succeeds for a freshly issued, unexpired, unconsumed capability with sufficient budget", async () => {
+    const { taskHash, price, capabilityId } = await setUpCapability();
 
-    const result = reservePayment(capabilityId, taskHash, price);
+    const result = await reservePayment(capabilityId, taskHash, price);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -46,48 +54,39 @@ describe("reservePayment", () => {
       expect(result.state.issuedFrom.capability.taskHash).toBe(hashCanonical({ taskHash }));
     }
 
-    const row = db
-      .prepare<[string], { consumed: number }>("SELECT consumed FROM capabilities WHERE capability_id = ?")
-      .get(capabilityId);
-    expect(row?.consumed).toBe(1);
+    expect(await consumedFlag(capabilityId)).toBe(1);
   });
 
-  it("fails a second reservation of the same capability with REPLAY, without double-spending budget", () => {
-    const { taskHash, price, capabilityId } = setUpCapability({ maxTotalSpend: "100.00" });
-    reservePayment(capabilityId, taskHash, price);
+  it("fails a second reservation of the same capability with REPLAY, without double-spending budget", async () => {
+    const { taskHash, price, capabilityId } = await setUpCapability({ maxTotalSpend: "100.00" });
+    await reservePayment(capabilityId, taskHash, price);
 
-    const second = reservePayment(capabilityId, taskHash, price);
+    const second = await reservePayment(capabilityId, taskHash, price);
 
     expect(second).toEqual({ ok: false, reason: "REPLAY" });
   });
 
-  it("fails an expired capability with STALE_NONCE, leaving nonce unconsumed and budget unchanged", () => {
-    const { taskHash, price, capabilityId } = setUpCapability();
-    expireCapability(capabilityId);
+  it("fails an expired capability with STALE_NONCE, leaving nonce unconsumed and budget unchanged", async () => {
+    const { taskHash, price, capabilityId } = await setUpCapability();
+    await expireCapability(capabilityId);
 
-    const result = reservePayment(capabilityId, taskHash, price);
+    const result = await reservePayment(capabilityId, taskHash, price);
 
     expect(result).toEqual({ ok: false, reason: "STALE_NONCE" });
-    const row = db
-      .prepare<[string], { consumed: number }>("SELECT consumed FROM capabilities WHERE capability_id = ?")
-      .get(capabilityId);
-    expect(row?.consumed).toBe(0);
+    expect(await consumedFlag(capabilityId)).toBe(0);
   });
 
-  it("fails when the task's remaining budget is insufficient, leaving the nonce unconsumed", () => {
-    const { taskHash, price, capabilityId } = setUpCapability({ maxTotalSpend: "5.00", price: "10.00" });
+  it("fails when the task's remaining budget is insufficient, leaving the nonce unconsumed", async () => {
+    const { taskHash, price, capabilityId } = await setUpCapability({ maxTotalSpend: "5.00", price: "10.00" });
 
-    const result = reservePayment(capabilityId, taskHash, price);
+    const result = await reservePayment(capabilityId, taskHash, price);
 
     expect(result).toEqual({ ok: false, reason: "BUDGET_EXCEEDED" });
-    const row = db
-      .prepare<[string], { consumed: number }>("SELECT consumed FROM capabilities WHERE capability_id = ?")
-      .get(capabilityId);
-    expect(row?.consumed).toBe(0);
+    expect(await consumedFlag(capabilityId)).toBe(0);
   });
 
   it("under concurrent reservation attempts on the same capability, exactly one succeeds", async () => {
-    const { taskHash, price, capabilityId } = setUpCapability();
+    const { taskHash, price, capabilityId } = await setUpCapability();
 
     const attempts = Array.from({ length: 20 }, () =>
       Promise.resolve().then(() => reservePayment(capabilityId, taskHash, price)),
@@ -103,8 +102,8 @@ describe("reservePayment", () => {
 
 describe("submitPayment", () => {
   it("returns a SubmittedPaymentState nesting the ReservedPaymentState, with a stub-signed payload", async () => {
-    const { taskHash, price, capabilityId } = setUpCapability();
-    const reserved = reservePayment(capabilityId, taskHash, price);
+    const { taskHash, price, capabilityId } = await setUpCapability();
+    const reserved = await reservePayment(capabilityId, taskHash, price);
     if (!reserved.ok) throw new Error("expected reservation to succeed");
 
     const stubSigner = (payload: string) => `stub-signature-of:${payload.length}`;
@@ -115,8 +114,8 @@ describe("submitPayment", () => {
   });
 
   it("accepts an async signer (e.g. the real Ledger signer) just as well as a sync one", async () => {
-    const { taskHash, price, capabilityId } = setUpCapability();
-    const reserved = reservePayment(capabilityId, taskHash, price);
+    const { taskHash, price, capabilityId } = await setUpCapability();
+    const reserved = await reservePayment(capabilityId, taskHash, price);
     if (!reserved.ok) throw new Error("expected reservation to succeed");
 
     const asyncSigner = async (payload: string) => `async-sig:${payload.length}`;
@@ -128,8 +127,8 @@ describe("submitPayment", () => {
 
 describe("resolveSubmission", () => {
   async function setUpSubmitted() {
-    const { taskHash, price, capabilityId } = setUpCapability();
-    const reserved = reservePayment(capabilityId, taskHash, price);
+    const { taskHash, price, capabilityId } = await setUpCapability();
+    const reserved = await reservePayment(capabilityId, taskHash, price);
     if (!reserved.ok) throw new Error("expected reservation to succeed");
     return submitPayment(reserved.state, (payload) => `sig:${payload.length}`);
   }
@@ -137,7 +136,7 @@ describe("resolveSubmission", () => {
   it("'settled' resolves to a SettledPaymentState nesting the SubmittedPaymentState", async () => {
     const submitted = await setUpSubmitted();
 
-    const resolved = resolveSubmission(submitted, "settled");
+    const resolved = await resolveSubmission(submitted, "settled");
 
     expect(resolved.status).toBe("SETTLED");
     expect(resolved.submittedFrom).toEqual(submitted);
@@ -146,7 +145,7 @@ describe("resolveSubmission", () => {
   it("'failed' resolves to a FailedPaymentState nesting the SubmittedPaymentState", async () => {
     const submitted = await setUpSubmitted();
 
-    const resolved = resolveSubmission(submitted, "failed");
+    const resolved = await resolveSubmission(submitted, "failed");
 
     expect(resolved.status).toBe("FAILED");
     expect(resolved.submittedFrom).toEqual(submitted);
@@ -155,7 +154,7 @@ describe("resolveSubmission", () => {
   it("'unknown' resolves to a RecoverablePaymentState nesting the SubmittedPaymentState", async () => {
     const submitted = await setUpSubmitted();
 
-    const resolved = resolveSubmission(submitted, "unknown");
+    const resolved = await resolveSubmission(submitted, "unknown");
 
     expect(resolved.status).toBe("RECOVERABLE");
     expect(resolved.submittedFrom).toEqual(submitted);

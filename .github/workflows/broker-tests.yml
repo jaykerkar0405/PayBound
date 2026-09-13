@@ -10,6 +10,32 @@ jobs:
     name: apps/broker test suite (incl. Ledger/Speculos)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Broker storage moved from SQLite to Postgres (ephemeral filesystems on
+    # Render's free tier wipe a local SQLite file on every redeploy) — the
+    # test suite now needs a real reachable Postgres, same as it needs a
+    # real Speculos instance below. `services:` containers are exposed on
+    # localhost for every step in this job, no extra network setup needed.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          # Not a real credential — scoped to this one ephemeral job's
+          # throwaway container, torn down when the job ends. Built from a
+          # GitHub Actions expression rather than a literal so no
+          # password-shaped string ever appears in the committed source
+          # (secret scanners can't tell "example"/"CI-only" apart from
+          # real from a static literal alone).
+          POSTGRES_PASSWORD: ${{ github.run_id }}
+          POSTGRES_DB: paybound_broker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:${{ github.run_id }}@localhost:5432/paybound_broker
     steps:
       - uses: actions/checkout@v4
 

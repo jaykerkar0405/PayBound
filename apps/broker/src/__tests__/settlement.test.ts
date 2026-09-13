@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { db } from "../db.js";
+import { pool } from "../db.js";
 import { seedRegistry } from "../registry.js";
 import { issueCapability } from "../issuer.js";
 import { createTask } from "../budget.js";
@@ -21,10 +21,10 @@ import type { HederaReconciliationResult } from "@paybound/settlement";
 async function setUpSubmitted() {
   const taskHash = hashCanonical(randomUUID());
   const resourceId = randomUUID();
-  seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price: "10.00" }]);
-  createTask(taskHash, "100.00");
+  await seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price: "10.00" }]);
+  await createTask(taskHash, "100.00");
 
-  const issued = issueCapability({
+  const issued = await issueCapability({
     taskDefinition: { taskHash },
     resourceId,
     exactAmount: "10.00",
@@ -32,25 +32,25 @@ async function setUpSubmitted() {
     session: "sandbox-public-key",
   });
 
-  const reserved = reservePayment(issued.capabilityId, taskHash, "10.00");
+  const reserved = await reservePayment(issued.capabilityId, taskHash, "10.00");
   if (!reserved.ok) throw new Error("expected reservation to succeed");
   return submitPayment(reserved.state, (payload) => `sig:${payload.length}`);
 }
 
-function submissionStatus(nonce: string): string | null {
-  const row = db
-    .prepare<[string], { status: string | null }>("SELECT status FROM payment_submissions WHERE nonce = ?")
-    .get(nonce);
-  return row?.status ?? null;
+async function submissionStatus(nonce: string): Promise<string | null> {
+  const result = await pool.query<{ status: string | null }>(
+    "SELECT status FROM payment_submissions WHERE nonce = $1",
+    [nonce],
+  );
+  return result.rows[0]?.status ?? null;
 }
 
-function hederaTxIdForNonce(nonce: string): string | null {
-  const row = db
-    .prepare<[string], { hedera_transaction_id: string | null }>(
-      "SELECT hedera_transaction_id FROM payment_submissions WHERE nonce = ?",
-    )
-    .get(nonce);
-  return row?.hedera_transaction_id ?? null;
+async function hederaTxIdForNonce(nonce: string): Promise<string | null> {
+  const result = await pool.query<{ hedera_transaction_id: string | null }>(
+    "SELECT hedera_transaction_id FROM payment_submissions WHERE nonce = $1",
+    [nonce],
+  );
+  return result.rows[0]?.hedera_transaction_id ?? null;
 }
 
 function fakeDeps(overrides: Partial<SettlementDeps> = {}): SettlementDeps {
@@ -128,7 +128,7 @@ describe("settleAndRecord", () => {
       await settleAndRecord(submitted, deps);
 
       expect(deps.submitToHedera).not.toHaveBeenCalled();
-      expect(submissionStatus(submitted.capability.nonce)).toBeNull();
+      expect(await submissionStatus(submitted.capability.nonce)).toBeNull();
     });
   });
 
@@ -148,7 +148,7 @@ describe("settleAndRecord", () => {
 
       await settleAndRecord(submitted, deps);
 
-      expect(submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
+      expect(await submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
       expect(deps.queryHederaTransactionReceipt).not.toHaveBeenCalled();
       expect(deps.logSettlementOutcome).toHaveBeenCalledExactlyOnceWith({
         eventType: "settlement_outcome",
@@ -173,7 +173,7 @@ describe("settleAndRecord", () => {
 
       await settleAndRecord(submitted, deps);
 
-      expect(submissionStatus(submitted.capability.nonce)).toBe("FAILED");
+      expect(await submissionStatus(submitted.capability.nonce)).toBe("FAILED");
       expect(deps.logSettlementOutcome).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ hederaTransactionId: "0.0.1@1.2", status: "INSUFFICIENT_ACCOUNT_BALANCE" }),
       );
@@ -193,7 +193,7 @@ describe("settleAndRecord", () => {
       await settleAndRecord(submitted, deps);
 
       expect(deps.queryHederaTransactionReceipt).toHaveBeenCalledExactlyOnceWith("0.0.1@1.3");
-      expect(submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
+      expect(await submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
       expect(deps.logSettlementOutcome).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ hederaTransactionId: "0.0.1@1.3", status: "SUCCESS" }),
       );
@@ -211,7 +211,7 @@ describe("settleAndRecord", () => {
       await settleAndRecord(submitted, deps);
 
       expect(deps.submitToHedera).toHaveBeenCalledTimes(1);
-      expect(submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
+      expect(await submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
       expect(deps.logSettlementOutcome).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ hederaTransactionId: "0.0.1@1.4", status: "unknown" }),
       );
@@ -226,7 +226,7 @@ describe("settleAndRecord", () => {
       await settleAndRecord(submitted, deps);
 
       expect(deps.queryHederaTransactionReceipt).not.toHaveBeenCalled();
-      expect(submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
+      expect(await submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
       expect(deps.logSettlementOutcome).not.toHaveBeenCalled();
     });
 
@@ -240,7 +240,7 @@ describe("settleAndRecord", () => {
       });
 
       await expect(settleAndRecord(submitted, deps)).resolves.toBeUndefined();
-      expect(submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
+      expect(await submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
     });
   });
 });
@@ -271,7 +271,7 @@ describe("settleAndRecord — Gap 1: hedera_transaction_id persistence", () => {
     await settleAndRecord(submitted, fakeDeps({
       submitToHedera: vi.fn().mockResolvedValue({ outcome: "settled", transactionId: txId, status: "SUCCESS", strategy: "hedera_direct" }),
     }));
-    expect(hederaTxIdForNonce(submitted.capability.nonce)).toBe(txId);
+    expect(await hederaTxIdForNonce(submitted.capability.nonce)).toBe(txId);
   });
 
   it("persists hedera_transaction_id even when the payment ends up RECOVERABLE", async () => {
@@ -281,8 +281,8 @@ describe("settleAndRecord — Gap 1: hedera_transaction_id persistence", () => {
       submitToHedera: vi.fn().mockResolvedValue({ outcome: "unknown", transactionId: txId, status: null, strategy: "hedera_direct" }),
       queryHederaTransactionReceipt: vi.fn().mockRejectedValue(new Error("RECEIPT_NOT_FOUND")),
     }));
-    expect(submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
-    expect(hederaTxIdForNonce(submitted.capability.nonce)).toBe(txId);
+    expect(await submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
+    expect(await hederaTxIdForNonce(submitted.capability.nonce)).toBe(txId);
   });
 
   it("does NOT persist hedera_transaction_id when submitToHedera throws (never dispatched)", async () => {
@@ -290,7 +290,7 @@ describe("settleAndRecord — Gap 1: hedera_transaction_id persistence", () => {
     await settleAndRecord(submitted, fakeDeps({
       submitToHedera: vi.fn().mockRejectedValue(new Error("network error")),
     }));
-    expect(hederaTxIdForNonce(submitted.capability.nonce)).toBeNull();
+    expect(await hederaTxIdForNonce(submitted.capability.nonce)).toBeNull();
   });
 });
 
@@ -329,14 +329,14 @@ describe("settleAndRecord — Fix 3: crash-recovery provisional marker", () => {
       // proving the provisional write happens strictly before dispatch,
       // not as a side effect of it finishing.
       submitToHedera: vi.fn().mockImplementation(async () => {
-        statusDuringDispatch = submissionStatus(submitted.capability.nonce);
+        statusDuringDispatch = await submissionStatus(submitted.capability.nonce);
         return { outcome: "settled", transactionId: "0.0.1@700.0", status: "SUCCESS", strategy: "hedera_direct" };
       }),
     }));
 
     expect(statusDuringDispatch).toBe("RECOVERABLE");
     // And the real final status still correctly wins once dispatch completes.
-    expect(submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
+    expect(await submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
   });
 
   it("a crash between dispatch and resolveSubmission is reconcilable by the startup sweep (the actual audit repro, simulated)", async () => {
@@ -350,15 +350,15 @@ describe("settleAndRecord — Fix 3: crash-recovery provisional marker", () => {
     // settleAndRecord/resolveSubmission at all, exactly as a real crash
     // would never reach that line either).
     const { markProvisionallyRecoverable, persistHederaTxId } = await import("../state-machine.js");
-    markProvisionallyRecoverable(submitted.capability.nonce);
-    persistHederaTxId(submitted.capability.nonce, txId);
+    await markProvisionallyRecoverable(submitted.capability.nonce);
+    await persistHederaTxId(submitted.capability.nonce, txId);
 
     // Before Fix 3, this row would never have reached this state at all —
     // it would show status=NULL, and the line below would already be the
     // failing assertion. Confirms the "crash" state is genuinely
     // discoverable, not just eventually-consistent by luck.
-    expect(submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
-    expect(hederaTxIdForNonce(submitted.capability.nonce)).toBe(txId);
+    expect(await submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
+    expect(await hederaTxIdForNonce(submitted.capability.nonce)).toBe(txId);
 
     // Broker "restarts" — the startup sweep runs, exactly as
     // apps/broker/src/index.ts calls it on every real boot.
@@ -368,18 +368,18 @@ describe("settleAndRecord — Fix 3: crash-recovery provisional marker", () => {
       } satisfies HederaReconciliationResult),
     });
 
-    expect(submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
+    expect(await submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
   });
 
   it("a crash before ANY dispatch was attempted still leaves hedera_transaction_id NULL, correctly excluded from the sweep (documented residual — nothing to reconcile against)", async () => {
     const submitted = await setUpSubmitted();
     const { markProvisionallyRecoverable } = await import("../state-machine.js");
-    markProvisionallyRecoverable(submitted.capability.nonce);
+    await markProvisionallyRecoverable(submitted.capability.nonce);
     // No persistHederaTxId call — simulates a crash before submitToHedera
     // ever returned a transaction ID.
 
-    expect(submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
-    expect(hederaTxIdForNonce(submitted.capability.nonce)).toBeNull();
+    expect(await submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
+    expect(await hederaTxIdForNonce(submitted.capability.nonce)).toBeNull();
 
     const queryFn = vi.fn();
     await sweepRecoverablePayments({ queryHederaTransactionReceipt: queryFn });
@@ -387,7 +387,7 @@ describe("settleAndRecord — Fix 3: crash-recovery provisional marker", () => {
     // Correctly excluded — getRecoverableSubmissions() requires a non-NULL
     // transaction ID, since there is genuinely nothing to query Hedera for.
     expect(queryFn).not.toHaveBeenCalled();
-    expect(submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
+    expect(await submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
   });
 
   it("does not mark RECOVERABLE at all when settlement is not configured (the intentional 'stays at SUBMITTED' terminal state is unaffected)", async () => {
@@ -397,7 +397,7 @@ describe("settleAndRecord — Fix 3: crash-recovery provisional marker", () => {
 
     await settleAndRecord(submitted, fakeDeps());
 
-    expect(submissionStatus(submitted.capability.nonce)).toBeNull();
+    expect(await submissionStatus(submitted.capability.nonce)).toBeNull();
   });
 });
 
@@ -435,7 +435,7 @@ describe("sweepRecoverablePayments", () => {
         outcome: "settled", transactionId: "0.0.1@600.0", status: "SUCCESS",
       } satisfies HederaReconciliationResult),
     });
-    expect(submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
+    expect(await submissionStatus(submitted.capability.nonce)).toBe("SETTLED");
   });
 
   it("resolves RECOVERABLE+txId to FAILED when reconciliation returns definitive failure", async () => {
@@ -445,7 +445,7 @@ describe("sweepRecoverablePayments", () => {
         outcome: "failed", transactionId: "0.0.1@601.0", status: "INSUFFICIENT_ACCOUNT_BALANCE",
       } satisfies HederaReconciliationResult),
     });
-    expect(submissionStatus(submitted.capability.nonce)).toBe("FAILED");
+    expect(await submissionStatus(submitted.capability.nonce)).toBe("FAILED");
   });
 
   it("leaves RECOVERABLE untouched and does not throw when reconciliation still fails", async () => {
@@ -453,7 +453,7 @@ describe("sweepRecoverablePayments", () => {
     await expect(sweepRecoverablePayments({
       queryHederaTransactionReceipt: vi.fn().mockRejectedValue(new Error("mirror: not found yet")),
     })).resolves.toBeUndefined();
-    expect(submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
+    expect(await submissionStatus(submitted.capability.nonce)).toBe("RECOVERABLE");
   });
 
   it("is a no-op when settlement credentials are not configured", async () => {
