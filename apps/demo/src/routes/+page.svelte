@@ -13,7 +13,11 @@
   import TransactionList from "$lib/components/TransactionList.svelte";
   import ActivityLog from "$lib/components/ActivityLog.svelte";
 
-  let dashboardState = $state<DashboardState>(initialState());
+  // Unlike apps/tui-dashboard's fixed-height terminal viewport, this page's
+  // activity log is a scrollable web panel with its own internal scroll
+  // region (ActivityLog.svelte) — no reason to cap the underlying history
+  // the way state.ts's shared default does.
+  let dashboardState = $state<DashboardState>(initialState(Infinity));
   let runId = $state<string | null>(null);
   let triggering = $state(false);
   let rateLimitMessage = $state<string | null>(null);
@@ -105,7 +109,7 @@
       }
       const body = (await res.json()) as { runId: string };
       runId = body.runId;
-      dashboardState = initialState();
+      dashboardState = initialState(Infinity);
       dashboardState = { ...dashboardState, phase: "running" };
       connectStream(body.runId);
     } finally {
