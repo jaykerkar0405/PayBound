@@ -101,7 +101,29 @@ export function pushLog(state: DashboardState, text: string, time?: string): Das
   return { ...state, log: [...state.log, entry].slice(-MAX_LOG_LINES) };
 }
 
+/** done/failed share a rank: both are terminal outcomes for a stage, neither regresses to the other in practice, and either may legitimately follow the other's rank without being treated as backward. */
+const STAGE_STATUS_RANK: Record<StageStatus, number> = {
+  pending: 0,
+  active: 1,
+  done: 2,
+  failed: 2,
+};
+
+/**
+ * Stage status only ever moves forward: pending -> active -> {done,
+ * failed}. A status ranked lower than the stage's current one is ignored
+ * rather than applied — this guards against a duplicate or out-of-order
+ * stage-transition event (a replayed SSE line during a reconnect, an
+ * upstream retry re-running an earlier step) silently walking an
+ * already-"done"/"failed" stage backward, which is what actually produced
+ * an observed "stage N of 7" flicker in the web demo. The two real causes
+ * behind that (SSE replay-on-reconnect, and a Gemini-key-pool retry loop
+ * re-emitting attest/issue stage events every failed attempt) are each
+ * fixed at their own source; this is defense-in-depth for any other event
+ * source that might duplicate/reorder a stage transition later.
+ */
 function setStage(state: DashboardState, stage: StageId, status: StageStatus): DashboardState {
+  if (STAGE_STATUS_RANK[status] < STAGE_STATUS_RANK[state.stages[stage]]) return state;
   return { ...state, stages: { ...state.stages, [stage]: status } };
 }
 
@@ -248,8 +270,13 @@ export function reduceEvent(state: DashboardState, event: PbEvent): DashboardSta
       );
     }
 
-    case "stage":
+    case "stage": {
+      // Mirrors setStage's own monotonicity guard so a suppressed
+      // (backward) transition doesn't still print a stale-looking log
+      // line even though the stage state itself didn't move.
+      if (STAGE_STATUS_RANK[event.status] < STAGE_STATUS_RANK[state.stages[event.stage]]) return state;
       return pushLog(setStage(state, event.stage, event.status), stageLogText(event.stage, event.status));
+    }
 
     case "capability_issued":
       return pushLog({ ...state, capabilityId: event.capabilityId }, `Capability issued: ${event.capabilityId}`);
