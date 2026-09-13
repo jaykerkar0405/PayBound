@@ -291,4 +291,30 @@ describe("reduceEvent", () => {
     expect(state.txns[1]?.id).toBe("0.0.7162784@1789229604.446383474");
     expect(state.txns[1]?.url).toBe("https://hashscan.io/testnet/transaction/0.0.7162784@1789229604.446383474");
   });
+
+  it("ignores a stage event that would regress an already-done stage backward (duplicate/out-of-order delivery)", () => {
+    let state = initialState();
+    state = reduceEvent(state, { type: "stage", stage: "attest", status: "active" });
+    state = reduceEvent(state, { type: "stage", stage: "attest", status: "done" });
+    const logCountBeforeDuplicate = state.log.length;
+
+    // A duplicate/replayed "active" for a stage already "done" must not
+    // walk it backward, and must not be logged either — see setStage's
+    // and this reducer's "stage" case's monotonicity guard.
+    state = reduceEvent(state, { type: "stage", stage: "attest", status: "active" });
+
+    expect(state.stages.attest).toBe("done");
+    expect(state.log.length).toBe(logCountBeforeDuplicate);
+  });
+
+  it("still allows a stage to move forward normally after an ignored regression", () => {
+    let state = initialState();
+    state = reduceEvent(state, { type: "stage", stage: "attest", status: "active" });
+    state = reduceEvent(state, { type: "stage", stage: "attest", status: "done" });
+    state = reduceEvent(state, { type: "stage", stage: "attest", status: "active" }); // ignored
+    state = reduceEvent(state, { type: "stage", stage: "issue", status: "active" });
+
+    expect(state.stages.attest).toBe("done");
+    expect(state.stages.issue).toBe("active");
+  });
 });

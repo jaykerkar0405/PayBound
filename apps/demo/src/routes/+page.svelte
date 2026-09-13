@@ -116,8 +116,25 @@
   function connectStream(id: string): void {
     source?.close();
     source = new EventSource(`/api/run/${id}/stream`);
+
+    // Defense-in-depth, not the primary fix (that's the SSE route's own
+    // Last-Event-ID-based resume — see its doc comment): each `line`
+    // event's SSE id is this run's buffer index, monotonically increasing
+    // and scoped to this one EventSource connection/run. Ignoring any id
+    // at or below the last one actually applied makes this handler
+    // idempotent to a duplicate delivery from any source, not just the
+    // reconnect case the server-side fix already covers.
+    let lastAppliedLineId = -1;
     source.addEventListener("line", (e: MessageEvent) => {
-      const text = JSON.parse((e as MessageEvent).data) as string;
+      const rawId = e.lastEventId;
+      if (rawId !== "") {
+        const lineId = Number(rawId);
+        if (Number.isFinite(lineId)) {
+          if (lineId <= lastAppliedLineId) return;
+          lastAppliedLineId = lineId;
+        }
+      }
+      const text = JSON.parse(e.data) as string;
       handleLine(text);
     });
     source.addEventListener("done", () => {
