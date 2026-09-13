@@ -52,9 +52,23 @@ local to this process.
 ## Environment variables
 
 See `.env.example` — this app needs its own copies of the Gemini/Hedera
-credentials and `LEDGER_SIGNING_ENABLED=false`, since the spawned script's
-preflight checks read *this process's* environment, not the remote
-broker's.
+credentials, since the spawned script's preflight checks read *this
+process's* environment, not the remote broker's.
+
+**`LEDGER_SIGNING_ENABLED` stays `false` here, permanently, by design** —
+see `.env.example`'s comment. This dashboard is a UI/UX exploration surface
+judges reach from any device (mobile included), not a second hardware-
+signing proof. The real Ledger-backed signing path — Speculos plus a
+scripted auto-approver, so it runs unattended without bypassing the actual
+device app — lives in the local/TUI demo path instead
+(`apps/broker/scripts/e2e-live-demo.ts`'s `main()`, via
+`apps/broker/src/speculos-auto-approve.ts`), and that run is what the
+submission's recorded demo video shows. Do not flip this to `true` here
+just because Speculos becomes reachable from wherever this service runs —
+that would need revisiting the product decision, not just the
+infrastructure, since hardware-approval UX doesn't fit a judge on mobile
+regardless of hosting. See `docs/DEMO_SIGNING_APPROACH.md` for the full
+history of this decision.
 
 ## Local development
 

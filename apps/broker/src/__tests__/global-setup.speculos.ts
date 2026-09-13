@@ -4,6 +4,7 @@ import { connect } from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { config } from "../config.js";
+import { apiBase, currentScreenText, startSpeculosAutoApprove } from "../speculos-auto-approve.js";
 
 /**
  * Vitest `globalSetup` (task 1.8 fix, issue "broker tests fail on a fresh
@@ -22,10 +23,10 @@ import { config } from "../config.js";
  *  2. Otherwise, starts one itself via `docker run -d`, using the exact
  *     image/app/seed `start.sh` uses, and tears it down in the returned
  *     teardown — but only the instance it started.
- *  3. Runs the same on-device auto-approval poller this file's predecessor,
- *     `setup.speculos.ts`, used to run as a `setupFiles` hook (see git
- *     history) — the "page through, then confirm" flow a human does on real
- *     hardware.
+ *  3. Runs `../speculos-auto-approve.ts`'s poller for the life of the test
+ *     run — the "page through, then confirm" flow a human does on real
+ *     hardware, scripted. (Also reused by `scripts/e2e-live-demo.ts`'s
+ *     "auto-approved" live demo mode — see that module's own doc comment.)
  *
  * If Ledger signing is disabled (`LEDGER_SIGNING_ENABLED=false`) or pointed
  * at a non-Speculos transport (`LEDGER_TRANSPORT=hid`), this is a no-op:
@@ -38,26 +39,14 @@ const execFileAsync = promisify(execFile);
 const CONTAINER_NAME = "paybound-speculos";
 const IMAGE = "ghcr.io/ledgerhq/speculos@sha256:6ed9eefd51cddd862b746719af4cd7a3265fe43d0588c388359753cab8d46d11";
 const SEED = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+/** Must match `speculos-auto-approve.ts`'s own default for the same env var — both need to agree on which port Speculos's HTTP automation API is bound to. */
 const SPECULOS_API_PORT = Number(process.env["LEDGER_SPECULOS_API_PORT"] ?? 5000);
-const POLL_INTERVAL_MS = 150;
 const READY_TIMEOUT_MS = 30_000;
-/** Matches the final "hold to approve"-style screen in app-hedera's review flow, not the intermediate field screens. */
-const APPROVE_SCREEN_PATTERN = /confirm|hold to (approve|sign)/i;
 
 const speculosDir = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../../../../packages/ledger-signer/speculos",
 );
-
-function apiBase(): string {
-  return `http://${config.ledgerSpeculosHost}:${SPECULOS_API_PORT}`;
-}
-
-async function currentScreenText(): Promise<string> {
-  const response = await fetch(`${apiBase()}/events?currentscreenonly=true`);
-  const body = (await response.json()) as { events: Array<{ text: string }> };
-  return body.events.map((event) => event.text).join(" | ");
-}
 
 async function isHttpApiReachable(): Promise<boolean> {
   try {
@@ -96,28 +85,6 @@ async function waitUntilReachable(timeoutMs: number): Promise<void> {
     `Speculos did not become reachable (HTTP API ${apiBase()}, APDU ${config.ledgerSpeculosHost}:` +
       `${config.ledgerSpeculosPort}) within ${timeoutMs}ms.`,
   );
-}
-
-async function pressButton(button: "left" | "right" | "both"): Promise<void> {
-  await fetch(`${apiBase()}/button/${button}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "press-and-release" }),
-  });
-}
-
-async function pollAndApprove(): Promise<void> {
-  try {
-    const text = await currentScreenText();
-    if (APPROVE_SCREEN_PATTERN.test(text)) {
-      await pressButton("both");
-    } else if (text.length > 0) {
-      await pressButton("right");
-    }
-  } catch {
-    // Speculos may be between screens/transactions; a missed poll is
-    // caught on the next tick, POLL_INTERVAL_MS later.
-  }
 }
 
 async function dockerAvailable(): Promise<boolean> {
@@ -178,10 +145,10 @@ export default async function setup(): Promise<(() => Promise<void>) | void> {
     await waitUntilReachable(READY_TIMEOUT_MS);
   }
 
-  const pollTimer = setInterval(() => void pollAndApprove(), POLL_INTERVAL_MS);
+  const stopAutoApprove = startSpeculosAutoApprove();
 
   return async () => {
-    clearInterval(pollTimer);
+    stopAutoApprove();
     if (startedContainer) {
       await execFileAsync("docker", ["rm", "-f", CONTAINER_NAME]).catch(() => {});
     }

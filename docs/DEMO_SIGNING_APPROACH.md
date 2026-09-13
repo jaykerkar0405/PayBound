@@ -1,100 +1,95 @@
 # Demo Signing Approach
 
-## Decision: Option 1 — Human Approval
+## Current decision: scripted auto-approval, local/TUI path only
 
-The live demo will have a person physically approve each payment on the
-Speculos emulator (or a real Ledger device) at the right moment in the demo
-script. This is intentional design, not a bug.
+The local/TUI live-demo path (`pnpm --filter broker e2e:live`, and
+`apps/tui-dashboard`, which spawns the same command) runs real Ledger-backed
+signing against Speculos, approved automatically by a scripted button-presser
+(`apps/broker/src/speculos-auto-approve.ts`) — no human needs to stand at a
+keyboard, but the real device app still genuinely receives and processes the
+signing request and its on-screen review flow. This is what the submission's
+recorded demo video shows, and it is the real hardware-signing proof for the
+Ledger track.
 
----
+The deployed web dashboard (`apps/demo`, judge-facing, reachable from any
+device) permanently uses the Phase 1 stub signer instead
+(`LEDGER_SIGNING_ENABLED=false`, see `apps/demo/.env.example`) — it is a
+UI/UX exploration surface, not a second hardware-signing proof. See
+"Why the dashboard stays on the stub signer" below for why this isn't
+revisited just because hosting/reachability changes.
 
-## Background and Reasoning
-
-### Current state of the codebase (as of task 3.1)
-
-The Ledger-backed signing path (`packages/ledger-signer`, `apps/broker/src/signer.ts`)
-is currently a **stub**:
-
-- `packages/ledger-signer/src/index.ts` exports nothing — it is an explicit
-  placeholder pending task 3.1's signing-curve decision (see
-  `docs/OPEN_QUESTIONS.md "Ledger signing curve mismatch"`).
-- `apps/broker/src/signer.ts` uses a fixed HMAC secret for development.
-  It does **not** contact a Ledger device or Speculos in any code path today.
-
-There is therefore no active "hang on device approval" problem in the current
-codebase. This document records the approach for **when task 3.1 lands** and
-real Ledger signing is wired in.
-
-### Why Option 1, not Option 2
-
-**Option 2 — demo-safe auto-approval** — would require building a
-Speculos HTTP button poller that ships alongside the broker as real demo
-tooling. That is non-trivial engineering:
-
-- It needs its own lifecycle management (start alongside broker, stop
-  gracefully, survive broker restarts).
-- It couples the demo tightly to Speculos's HTTP API, which is emulator-only
-  and would need a different mechanism for a physical Ledger device.
-- It obscures the Ledger approval step — a core part of the security story —
-  from anyone watching the demo.
-
-**Option 1** avoids all of this:
-
-- Zero new code needed for the demo path.
-- The human approval step is a **feature, not a bug** in a security demo:
-  it shows the audience that the Ledger device produces a visible
-  confirmation prompt before money moves. Hiding that behind an auto-approver
-  defeats the demo's own purpose.
-- Faster to implement given the Sept 13 deadline (`docs/TASKS.md §Phase 6`).
-- If task 3.1 slips or the signing-curve question isn't resolved in time,
-  the stub signer continues working without any Speculos involvement at all.
-
-> **If Option 2 is ever needed** (e.g. a fully scripted CI-style end-to-end
-> test that exercises real signing unattended), revisit this document at that
-> point. The right reference implementation to adapt is the test-time poller
-> in `apps/broker/src/__tests__/global-setup.speculos.ts` (when that file is
-> created as part of task 3.1). Do **not** add such a poller now; the
-> infrastructure it would poll doesn't exist yet.
+This document replaces an earlier version of itself that predates both of
+these decisions (see git history) — that version was written when
+`apps/broker/src/signer.ts` was still a pure stub with no real Speculos
+path at all, and proposed **manual, human-attended approval** as the demo
+plan for whenever real signing landed. That plan was superseded before it
+was ever used for a live run: manual approval never shipped, and once real
+signing did land, going straight to scripted auto-approval was the better
+fit — see the next section.
 
 ---
 
-## Demo script: what the person running the demo must do
+## Why scripted auto-approval, not manual human approval
 
-When task 3.1 is complete and real Ledger signing is active:
+Manual approval (a person pressing Speculos's physical/emulated buttons at
+the right moment) has a real cost that scripted approval doesn't: it
+requires a human at a keyboard, in real time, synchronized with wherever
+in the pipeline the signing call happens to land — brittle for a recorded
+demo take, and a hard blocker for anything unattended (repeated rehearsal
+runs, CI-style checks).
 
-1. **Start Speculos before the demo** (see `packages/ledger-signer/speculos/README.md`).
-2. **Start the broker** (`pnpm --filter broker dev` or equivalent).
-3. When the demo triggers `POST /pay` or `POST /issue`, the Ledger device
-   (or Speculos UI) will display a transaction review screen.
-4. **Navigate and approve on-device**:
-   - Press **right** to advance through transaction fields.
-   - Press **both buttons** on the final "Sign" or "Approve" screen to confirm.
-5. The broker's signing call will unblock and the payment will proceed.
-
-> **Timing note**: approval must happen within the device timeout window
-> (configured in `packages/ledger-signer/src/device.ts` as
-> `SPECULOS_EXCHANGE_TIMEOUT_MS` — 60 s by default). If the demo pauses
-> longer than that before approval, the request will time out with:
-> `"ledger device: timed out waiting for a Speculos APDU response"`.
-> Simply re-trigger the payment after restarting Speculos to clear stale
-> device state (status word `0x6901` indicates leftover state from a prior
-> timed-out attempt).
+Scripted auto-approval (`speculos-auto-approve.ts`, adapted from the test
+suite's own `global-setup.speculos.ts` poller) keeps the demo an honest
+run of the real signing path — Speculos's on-device review flow genuinely
+executes — without needing a human present. It polls Speculos's HTTP
+automation API for the current review screen and pages/confirms through
+it (`right` to advance fields, `both` to confirm), the same sequence a
+human would perform.
 
 ---
 
-## Speculos start script
+## Why the dashboard stays on the stub signer
 
-`packages/ledger-signer/speculos/start.sh` provides two modes:
+A further idea explored during this project — routing Speculos's pending
+approval screen to a judge's *browser* so they could click a real
+approve/reject button themselves — was investigated and **fully cancelled,
+not deferred**. Even setting aside hosting cost (a publicly-reachable
+Speculos instance would need a paid Render Private Service, or a
+self-hosted VM/tunnel — all rejected as unnecessary spend for this), the
+idea has a product-fit problem independent of hosting: hardware-approval
+UX (reading a device review screen, pressing through fields) does not work
+for a judge on a phone. That problem doesn't go away no matter how
+Speculos is hosted, so this is not "revisit once reachability improves" —
+it's closed. If browser-driven human approval is ever wanted again, it
+needs a different UX proposal, not just infrastructure.
 
-- **Interactive (default)**: `./start.sh` — for human-attended runs where
-  you can see Speculos's screen in a terminal. Starts Speculos in the
-  foreground; press Ctrl-C to stop.
-- **Background (demo/script)**: `./start.sh --detach` — starts Speculos as
-  a detached Docker container (`docker run -d`) and prints the container ID.
-  Run `./stop.sh` to stop it afterward.
+The dashboard's `LEDGER_SIGNING_ENABLED=false` is therefore permanent
+product intent, not a temporary hosting workaround — see the comment on
+that line in `apps/demo/.env.example` before changing it.
 
-The original `docker run -it` invocation failed in non-interactive/scripted
-contexts ("cannot attach stdin to a TTY-enabled container because stdin is
-not a terminal"). The updated script uses `-it` only in interactive mode and
-`-d` in detached mode. See `packages/ledger-signer/speculos/README.md` for
-full usage.
+---
+
+## Running the local/TUI path yourself
+
+1. **Start Speculos** (see `packages/ledger-signer/speculos/README.md`):
+   `packages/ledger-signer/speculos/start.sh` (interactive) or
+   `--detach` (background/scripted).
+2. **Start the broker**, then run `pnpm --filter broker e2e:live` (or
+   `apps/tui-dashboard`, which spawns the same command).
+3. With `LEDGER_SIGNING_ENABLED` at its default `true` and
+   `LEDGER_TRANSPORT=speculos`, `e2e-live-demo.ts`'s `main()` starts the
+   auto-approve poller for the whole run — no manual button-pressing is
+   needed or expected.
+
+If you want to watch (or manually override) the approval yourself instead,
+you still can: Speculos's screen is a real, inspectable device UI
+(`packages/ledger-signer/speculos/README.md` documents the manual
+right/both button sequence) — the poller pressing buttons on your behalf
+doesn't prevent you from also watching it happen.
+
+> **Timing note**: the device timeout window is
+> `SPECULOS_EXCHANGE_TIMEOUT_MS` in `packages/ledger-signer/src/device.ts`
+> (60s by default). If Speculos becomes unresponsive or the poller can't
+> keep up, the signing call fails with `"ledger device: timed out waiting
+> for a Speculos APDU response"`; restart Speculos to clear stale device
+> state (status word `0x6901`) and re-trigger the run.

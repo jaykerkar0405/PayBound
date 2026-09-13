@@ -73,6 +73,7 @@ import { hcsEventSchema, queryHederaMirrorNode, requireTopicId } from "@paybound
 import { config as brokerConfig } from "../src/config.js";
 import { isSettlementConfigured } from "../src/settlement.js";
 import { pool } from "../src/db.js";
+import { startSpeculosAutoApprove } from "../src/speculos-auto-approve.js";
 import { ensureSeeded, LIVE_AGENT_RUN_PRICE, LIVE_AGENT_RUN_RESOURCE_ID } from "./seed-live-agent-run.js";
 import { payForGatedContent } from "./pay-for-gated-content.js";
 
@@ -799,22 +800,58 @@ async function runX402PurchaseStage(): Promise<number> {
   }
 }
 
+/**
+ * Both the scenario stage's payment (submitted by the real, deployed
+ * Broker, over HTTP) and the x402 purchase stage's payment (signed
+ * in-process — `runX402PurchaseStage` -> `pay-for-gated-content.ts` ->
+ * `submitPayment`/`resolveSigner`, not spawned separately) go through
+ * `resolveSigner()` (signer.ts), which is the real Speculos-backed
+ * `ledgerSign` whenever `LEDGER_SIGNING_ENABLED` is left at its default
+ * `true` with `LEDGER_TRANSPORT=speculos`. Auto-approving is started once,
+ * here, spanning both stages, rather than scoped narrowly to one signing
+ * call — it's a harmless no-op HTTP poll against Speculos's screen when
+ * nothing is pending (see speculos-auto-approve.ts's doc comment), so
+ * there's no benefit to threading start/stop calls through each stage
+ * individually, only more places to forget to stop it.
+ *
+ * This is what makes the default "auto-approved" demo mode an honest
+ * demonstration of the real hardware-signing path rather than silently
+ * skipping it: the Ledger app genuinely receives and processes the signing
+ * request and its on-screen review flow, exactly as a human-attended run
+ * would, just with the button presses scripted instead of manual (see
+ * docs/DEMO_SIGNING_APPROACH.md). When Ledger signing is disabled or
+ * pointed at a non-Speculos transport, there is nothing to auto-approve —
+ * `preflight()`'s own Speculos check (stage 1) already reflects that same
+ * condition.
+ */
+function maybeStartSpeculosAutoApprove(): (() => void) | undefined {
+  if (!(brokerConfig.ledgerSigningEnabled && brokerConfig.ledgerTransport === "speculos")) {
+    return undefined;
+  }
+  return startSpeculosAutoApprove();
+}
+
 async function main(): Promise<void> {
   const scenario = selectDemoScenario();
   const isAdversarial = scenario.name === "hijack" || scenario.name === "fake-capability";
 
-  const scenarioExitCode = await runAdversarialScenarioDemo();
+  const stopAutoApprove = maybeStartSpeculosAutoApprove();
+  try {
+    const scenarioExitCode = await runAdversarialScenarioDemo();
 
-  // In an adversarial scenario, the demo's objective is verifying that the malicious
-  // transaction was blocked by the Broker's 9-clause invariant. We skip the subsequent
-  // x402 purchase stage to keep the demonstration focused and avoid unnecessary Speculos latency.
-  if (isAdversarial || scenarioExitCode !== 0) {
-    process.exitCode = scenarioExitCode;
-    return;
+    // In an adversarial scenario, the demo's objective is verifying that the malicious
+    // transaction was blocked by the Broker's 9-clause invariant. We skip the subsequent
+    // x402 purchase stage to keep the demonstration focused and avoid unnecessary Speculos latency.
+    if (isAdversarial || scenarioExitCode !== 0) {
+      process.exitCode = scenarioExitCode;
+      return;
+    }
+
+    const x402ExitCode = await runX402PurchaseStage();
+    process.exitCode = x402ExitCode;
+  } finally {
+    stopAutoApprove?.();
   }
-
-  const x402ExitCode = await runX402PurchaseStage();
-  process.exitCode = x402ExitCode;
 }
 
 main().catch((err: unknown) => {
