@@ -98,11 +98,20 @@ export interface GeminiKeyPool {
   readonly size: number;
   /**
    * Returns the next key ready to try right now (skipping exhausted-today
-   * keys, and cooling-down keys whose window hasn't cleared yet), or
-   * `undefined` if none are currently usable — the caller's cue to fall
-   * through to Groq (requirement: never wait for a cooldown mid-run).
+   * keys, cooling-down keys whose window hasn't cleared yet, and any index
+   * in `exclude`), or `undefined` if none are currently usable — the
+   * caller's cue to fall through to Groq (requirement: never wait for a
+   * cooldown mid-run).
+   *
+   * `exclude` exists because a non-quota ("other") failure deliberately
+   * does NOT change a key's persistent status (see `reportRpmExhausted`/
+   * `reportRpdExhausted` — a non-quota error isn't a quota problem, so
+   * marking the key cooling/exhausted would be wrong). Without a way to
+   * skip it for the REST OF THIS CALLER'S ROUND, the same still-"available"
+   * key would be returned again on the very next call — the caller is
+   * expected to pass the set of indices it has already tried this round.
    */
-  nextAvailable(): GeminiKeyPoolEntry | undefined;
+  nextAvailable(exclude?: ReadonlySet<number>): GeminiKeyPoolEntry | undefined;
   /** Call after a key successfully served a request. */
   reportSuccess(index: number): void;
   /** Call after a key hits an RPM 429 — cools it down for RPM_COOLDOWN_MS, not marked dead. */
@@ -139,9 +148,10 @@ export function createGeminiKeyPool(keys: readonly string[]): GeminiKeyPool {
 
   return {
     size: states.length,
-    nextAvailable(): GeminiKeyPoolEntry | undefined {
+    nextAvailable(exclude?: ReadonlySet<number>): GeminiKeyPoolEntry | undefined {
       const now = Date.now();
       for (const state of states) {
+        if (exclude?.has(state.index)) continue;
         if (state.status === "exhausted_today") continue;
         if (state.status === "cooling_down") {
           if (now < state.availableAt) continue;
