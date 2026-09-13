@@ -157,12 +157,22 @@ describe("reduceEvent", () => {
     expect(state.stages.x402_purchase).toBe("active");
   });
 
-  it("caps the event log at the last 10 lines without dropping the most recent ones", () => {
+  it("caps the event log at the last 10 lines without dropping the most recent ones (the default, used by apps/tui-dashboard)", () => {
     let state = initialState();
     for (let i = 0; i < 25; i++) {
       state = reduceEvent(state, { type: "run_error", source: "test", message: `err-${i}` });
     }
     expect(state.log).toHaveLength(10);
+    expect(state.log.at(-1)?.text).toContain("err-24");
+  });
+
+  it("retains the full log with no cap when initialState is given Infinity (apps/demo's scrollable web panel)", () => {
+    let state = initialState(Infinity);
+    for (let i = 0; i < 25; i++) {
+      state = reduceEvent(state, { type: "run_error", source: "test", message: `err-${i}` });
+    }
+    expect(state.log).toHaveLength(25);
+    expect(state.log.at(0)?.text).toContain("err-0");
     expect(state.log.at(-1)?.text).toContain("err-24");
   });
 

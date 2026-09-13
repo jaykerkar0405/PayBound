@@ -82,15 +82,26 @@ export interface DashboardState {
   /** Independent outcome of the separate x402 gated-content purchase stage — see `TrackOutcome`. */
   readonly x402Outcome?: TrackOutcome;
   readonly txns: readonly TxLogEntry[];
+  /**
+   * How many of the most recent log entries `pushLog` retains — a property
+   * of this particular reducer instance, not a shared module constant, so
+   * apps/demo (a scrollable web panel, one page load per run) and
+   * apps/tui-dashboard (a fixed-height terminal viewport across a
+   * long-lived session) can each pass their own value to `initialState`
+   * without diverging this file, which the two apps otherwise keep
+   * byte-for-byte identical. `Infinity` disables the cap entirely:
+   * `[...].slice(-Infinity)` returns the whole array (negative slice
+   * indices clamp to 0), so no special-casing is needed in `pushLog`.
+   */
+  readonly maxLogLines: number;
 }
 
-const MAX_LOG_LINES = 10;
 let logIdCounter = 0;
 
-export function initialState(): DashboardState {
+export function initialState(maxLogLines = 10): DashboardState {
   const stages = {} as Record<StageId, StageStatus>;
   for (const s of STAGE_ORDER) stages[s] = "pending";
-  return { phase: "waiting", stages, log: [], txns: [] };
+  return { phase: "waiting", stages, log: [], txns: [], maxLogLines };
 }
 
 export function pushLog(state: DashboardState, text: string, time?: string): DashboardState {
@@ -98,7 +109,7 @@ export function pushLog(state: DashboardState, text: string, time?: string): Das
   if (!trimmed) return state;
   const now = time ?? new Date().toTimeString().slice(0, 8);
   const entry: LogLine = { id: ++logIdCounter, text: trimmed, time: now };
-  return { ...state, log: [...state.log, entry].slice(-MAX_LOG_LINES) };
+  return { ...state, log: [...state.log, entry].slice(-state.maxLogLines) };
 }
 
 /** done/failed share a rank: both are terminal outcomes for a stage, neither regresses to the other in practice, and either may legitimately follow the other's rank without being treated as backward. */
