@@ -32,16 +32,28 @@ export const GET: RequestHandler = ({ params, request }) => {
   const encoder = new TextEncoder();
   let unsubscribe: (() => void) | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
+  // Set the moment the controller is closed (by onDone, cancel, or the
+  // vanished-run branch below) — needed because `subscribeToRun` calls
+  // `onDone` SYNCHRONOUSLY when the run has already finished (e.g. one that
+  // fails within milliseconds of starting), i.e. before the `heartbeat =
+  // setInterval(...)` line below it ever runs. Without this flag, that
+  // ordering let a heartbeat get scheduled AFTER the controller was already
+  // closed, and 15s later `controller.enqueue` on a closed controller threw
+  // an uncaught `ERR_INVALID_STATE`, crashing the whole process — any
+  // client connecting to an already-finished run's stream (a slow load, or
+  // EventSource's own reconnect) could take the server down. Regression
+  // test: src/__tests__/run-stream-crash.test.ts.
+  let closed = false;
 
   const stream = new ReadableStream({
     start(controller) {
       const send = (event: string, data: string, id?: number) => {
-        const idField = id !== undefined ? `id: ${id}\n` : "";
-        controller.enqueue(encoder.encode(`${idField}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        controller.enqueue(encoder.encode(`${id !== undefined ? `id: ${id}\n` : ""}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
       };
 
       const onLine = (line: string, index: number) => send("line", line, index);
       const onDone = () => {
+        closed = true;
         if (heartbeat !== undefined) clearInterval(heartbeat);
         const snapshot = getRunSnapshot(id);
         send("done", JSON.stringify({ status: snapshot?.status, exitCode: snapshot?.exitCode }));
@@ -53,18 +65,22 @@ export const GET: RequestHandler = ({ params, request }) => {
         // Run existed at the getRunSnapshot check above but vanished
         // (pruned) in the meantime — vanishingly unlikely, but close
         // cleanly rather than hang the connection open.
+        closed = true;
         controller.close();
         return;
       }
+      if (closed) return; // onDone already ran synchronously above (run had already finished) — no live stream to keep alive.
 
       // A comment line (":...") is ignored by EventSource's message/
       // named-event listeners entirely, but still counts as traffic to
       // whatever idle-connection timeout sits in front of this service.
       heartbeat = setInterval(() => {
+        if (closed) return;
         controller.enqueue(encoder.encode(": keepalive\n\n"));
       }, HEARTBEAT_MS);
     },
     cancel() {
+      closed = true;
       if (heartbeat !== undefined) clearInterval(heartbeat);
       unsubscribe?.();
     },

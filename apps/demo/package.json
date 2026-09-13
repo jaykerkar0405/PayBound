@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
+    "dev:live": "node --env-file=.env.local ./node_modules/vite/bin/vite.js dev",
     "lint": "eslint .",
+    "test": "vitest run",
     "build": "vite build",
     "start": "node build/index.js",
     "preview": "vite preview",

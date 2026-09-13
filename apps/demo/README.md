@@ -77,8 +77,10 @@ pnpm --filter broker dev:live          # a broker instance somewhere reachable
 pnpm --filter gated-content-service dev:live
 cd apps/demo
 cp .env.example .env.local             # fill in real values, BROKER_HOST=http://127.0.0.1:3000
-pnpm dev
+pnpm dev:live
 ```
+
+Use `dev:live`, not plain `dev`: confirmed empirically that `vite dev` does NOT load `.env.local` into `process.env` in this project — `run-manager.ts` spawns `e2e-live-demo.ts` with `env: process.env`, so under plain `vite dev` that child sees none of this file's values (including `DATABASE_URL`, which `apps/broker/src/config.ts` requires unconditionally at import time) and every run fails immediately. `dev:live` runs Vite itself under `node --env-file=.env.local`, the same pattern `apps/broker`/`apps/gated-content-service` use for their own `dev:live` scripts, so this file's values are real `process.env` entries the spawned child actually inherits. Plain `dev` still works for iterating on the page/UI without triggering real runs.
 
 ## Deploying (Render)
 
