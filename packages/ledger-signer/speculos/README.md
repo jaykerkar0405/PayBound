@@ -101,10 +101,19 @@ to any real funds; do not reuse it for anything real.
 ## Approving transactions during the live demo
 
 When the broker submits a signing request, Speculos displays a transaction
-review screen. A human must navigate and approve:
+review screen that must be navigated and confirmed:
 
 1. Press **right** to advance through each transaction field.
 2. Press **both buttons** on the final "Sign"/"Approve" screen to confirm.
+
+`scripts/e2e-live-demo.ts` (the `pnpm --filter broker e2e:live` / TUI
+dashboard path) does this automatically — `../../apps/broker/src/speculos-auto-approve.ts`
+polls Speculos's HTTP automation API and presses through exactly this
+sequence for the whole run, so no one needs to be at a keyboard. You can
+still watch it happen (or drive it by hand instead, e.g. while debugging)
+using the same right/both sequence above; the poller pressing buttons
+doesn't prevent manual interaction, it just means the demo doesn't depend
+on it.
 
 > **Approval timeout**: the broker's signing call waits up to 60 s. If
 > approval takes longer, the call times out with:
@@ -112,8 +121,9 @@ review screen. A human must navigate and approve:
 > Restart Speculos to clear stale device state (status word `0x6901`) before
 > retrying.
 
-See `docs/DEMO_SIGNING_APPROACH.md` for the full decision rationale on why
-human approval was chosen over auto-approval for the live demo.
+See `docs/DEMO_SIGNING_APPROACH.md` for the full decision rationale —
+including why the deployed web dashboard (`apps/demo`) deliberately does
+**not** use this path at all and stays on the stub signer permanently.
 
 ## Why signing works against a dummy transaction, not a real one
 
