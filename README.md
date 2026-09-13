@@ -1,5 +1,9 @@
 # PayBound
 
+<p align="center">
+  <img src="./assets/cover_image.png" alt="PayBound - Capability-based payment isolation for autonomous AI agents" width="700" />
+</p>
+
 **Capability-based payment isolation for autonomous AI agents.**
 
 PayBound separates an agent's reasoning from its financial authority. An agent that reads untrusted content, such as webpages, documents, or tool output, never holds a signing key and never sees a destination or amount. It can only invoke a single opaque capability reference. A trusted broker constructs and authorizes every payment before any untrusted content is ever read.
@@ -8,8 +12,25 @@ PayBound separates an agent's reasoning from its financial authority. An agent t
 
 ---
 
+## Demo
+
+[![Watch Demo Video](https://img.shields.io/badge/▶%20Watch%20Demo-assets%2Fdemo.mp4-007ACC?style=for-the-badge&logo=quicktime&logoColor=white)](./assets/demo.mp4)
+
+> 🎥 **[Watch Demo Video (`assets/demo.mp4`)](./assets/demo.mp4)** *(3m 39s)*
+>
+> A complete live walkthrough demonstrating:
+> - **Budget Issuance & Attestation**: Broker initializes task budget and completes workload attestation handshake.
+> - **Ledger Hardware Review**: On-device APDU review and confirmation via Speculos hardware emulator.
+> - **Hedera Settlement & x402**: Fast settlement via Blocky402 facilitator with an immutable HCS audit record.
+> - **Adversarial Prompt Injection Defense**: Malicious invoice payload fails structurally via Invariant Clause 7 (0 HBAR moved).
+> - **Physical Network Isolation**: Docker egress policy blocking all direct access to payment infrastructure.
+> - **Chainlink CRE Policy**: Confidential enterprise spend policy verification in a TEE enclave.
+
+---
+
 ## Table of Contents
 
+- [Demo](#demo)
 - [Motivation](#motivation)
 - [Design Principle](#design-principle)
 - [How It Works](#how-it-works)
@@ -39,6 +60,10 @@ An attacker no longer needs to steal a private key. They only need to get text i
 This isn't a problem unique to prompt injection. A hallucinated instruction, a manipulated tool response, or ordinary flawed reasoning can trigger the same failure. The underlying issue is structural:
 
 > Reasoning and financial authority currently live in the same trust domain. They should never share a trust domain, regardless of why the reasoning went wrong.
+
+<p align="center">
+  <img src="./assets/reasoning_vs_financial_auth.png" alt="Reasoning vs. Financial Authority" width="100%" />
+</p>
 
 ## Design Principle
 
@@ -143,6 +168,10 @@ Stated precisely: within the trust boundary described below, untrusted agent con
 **Explicitly out of scope:** a compromised issuer, a compromised sandbox, a compromised facilitator that alters settlement parameters after the broker has signed, or a legitimately vetted resource that later turns malicious. These exclusions are stated explicitly because a security boundary is only meaningful when its limits are named.
 
 ## Architecture
+
+<p align="center">
+  <img src="./assets/three_tier_architecture.png" alt="The Three-Tier Architecture" width="100%" />
+</p>
 
 ```text
 CORE (required for the security guarantee)
@@ -384,13 +413,11 @@ custom fee schedules in the settlement path."** The settlement asset is native H
 (`asset: "0.0.0"`), not an HTS token — that bullet wants a custom/HTS asset in the path,
 which this build doesn't have.
 
-### 4. Demo video shot list
+### 4. Demo video
 
 > "Demo video of five minutes or less showing the paid request executing."
 
-Not recorded as part of this task — a shot list instead, so it can be recorded in one
-take. Have `apps/gated-content-service` and `apps/broker` already running (per Setup
-above) before hitting record.
+The recorded demo video is available at [`assets/demo.mp4`](./assets/demo.mp4) (and linked in the [Demo](#demo) section above). Below is the shot list and timing breakdown:
 
 | # | Time | Screen | Show |
 |---|---|---|---|
@@ -436,9 +463,7 @@ PayBound is **functionally complete** across all six implementation phases and h
 
 ### What is not yet complete
 
-- **6.3** — Live demo script/recording
 - **6.5** — Final integrated property test pass
-- **6.6** — Submission packaging
 - **3.1** — Real Ledger hardware (Speculos emulator used throughout)
 
 ### Known limitations (disclosed, not blocking submission)
@@ -471,7 +496,7 @@ PayBound is **functionally complete** across all six implementation phases and h
 - [x] Reference agent integration (real LLM via `runSandboxLifecycle`, `apps/sandbox/src/live-run.ts`)
 - [x] End-to-end live path (`pnpm e2e:live`) — task definition → issuance → agent → payment → Hedera settlement + HCS log
 - [x] [End-to-end example and walkthrough doc](./docs/WALKTHROUGH.md)
-- [ ] Live demo script / recording (task 6.3)
+- [x] Live demo recording and media assets (`assets/demo.mp4`) (task 6.3)
 
 ## Contributing
 
