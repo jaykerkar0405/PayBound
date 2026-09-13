@@ -45,9 +45,9 @@ async function post(path: string, body: unknown) {
 }
 
 /** Seeds a fresh registry entry and returns an /issue body bound to `session`. */
-function issueBodyFor(session: string, price = "10.00") {
+async function issueBodyFor(session: string, price = "10.00") {
   const resourceId = randomUUID();
-  seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price }]);
+  await seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price }]);
   return {
     taskDefinition: { scenario: "attestation-gate", nonce: randomUUID() },
     resourceId,
@@ -75,7 +75,7 @@ describe("attestation gate — ATTESTATION_ENABLED=true (fail-closed)", () => {
     process.env.ATTESTATION_ENABLED = "true";
     const identity = makeIdentity();
 
-    const res = await post("/issue", issueBodyFor(identity.publicKey));
+    const res = await post("/issue", await issueBodyFor(identity.publicKey));
 
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: string; message: string };
@@ -88,7 +88,7 @@ describe("attestation gate — ATTESTATION_ENABLED=true (fail-closed)", () => {
     const identity = makeIdentity();
     await attest(identity);
 
-    const res = await post("/issue", issueBodyFor(identity.publicKey));
+    const res = await post("/issue", await issueBodyFor(identity.publicKey));
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { capabilityId: string };
@@ -98,7 +98,7 @@ describe("attestation gate — ATTESTATION_ENABLED=true (fail-closed)", () => {
   it("rejects POST /pay with 401 attestation_required for a capability whose bound session is unattested", async () => {
     // Issue the capability with the gate OFF, so it exists and is payable...
     const identity = makeIdentity();
-    const issueRes = await post("/issue", issueBodyFor(identity.publicKey));
+    const issueRes = await post("/issue", await issueBodyFor(identity.publicKey));
     expect(issueRes.status).toBe(200);
     const { capabilityId } = (await issueRes.json()) as { capabilityId: string };
 
@@ -118,12 +118,12 @@ describe("attestation gate — ATTESTATION_ENABLED=true (fail-closed)", () => {
     await attest(attestedIdentity);
 
     // Capability bound to the OTHER, unattested session.
-    const issueRes = await post("/issue", issueBodyFor(otherIdentity.publicKey));
+    const issueRes = await post("/issue", await issueBodyFor(otherIdentity.publicKey));
     expect(issueRes.status).toBe(401);
 
     // And the attested identity's own issuance still works, proving the
     // rejection above is session-scoped, not a blanket failure.
-    const ownRes = await post("/issue", issueBodyFor(attestedIdentity.publicKey));
+    const ownRes = await post("/issue", await issueBodyFor(attestedIdentity.publicKey));
     expect(ownRes.status).toBe(200);
   });
 
@@ -132,7 +132,7 @@ describe("attestation gate — ATTESTATION_ENABLED=true (fail-closed)", () => {
     const identity = makeIdentity();
     await attest(identity);
 
-    const issueRes = await post("/issue", issueBodyFor(identity.publicKey));
+    const issueRes = await post("/issue", await issueBodyFor(identity.publicKey));
     expect(issueRes.status).toBe(200);
     const { capabilityId } = (await issueRes.json()) as { capabilityId: string };
 
@@ -149,7 +149,7 @@ describe("attestation gate — ATTESTATION_ENABLED unset/false (the shipped defa
     expect(process.env.ATTESTATION_ENABLED).toBeUndefined();
     const identity = makeIdentity();
 
-    const issueRes = await post("/issue", issueBodyFor(identity.publicKey));
+    const issueRes = await post("/issue", await issueBodyFor(identity.publicKey));
     expect(issueRes.status).toBe(200);
     const { capabilityId } = (await issueRes.json()) as { capabilityId: string };
 
@@ -170,7 +170,7 @@ describe("attestation gate — ATTESTATION_ENABLED unset/false (the shipped defa
     process.env.ATTESTATION_ENABLED = "false";
     const unattested = makeIdentity();
 
-    const issueRes = await post("/issue", issueBodyFor(unattested.publicKey));
+    const issueRes = await post("/issue", await issueBodyFor(unattested.publicKey));
     expect(issueRes.status).toBe(200);
     const { capabilityId } = (await issueRes.json()) as { capabilityId: string };
 

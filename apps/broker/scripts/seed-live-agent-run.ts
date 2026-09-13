@@ -1,10 +1,10 @@
 /**
  * One-off dev/verification script — NOT production code, NOT part of the
  * broker's runtime. Seeds one resource-registry entry and one task budget
- * directly against whatever `broker.db` is on `config.dbPath` (default
- * "./broker.db"), so `apps/sandbox/src/live-run.ts` (task 6.1a) has a real
- * resource + task to issue a capability against when run against a live
- * `pnpm --filter broker dev` (or `dev:live`) server.
+ * directly against whatever Postgres `DATABASE_URL` points at, so
+ * `apps/sandbox/src/live-run.ts` (task 6.1a) has a real resource + task to
+ * issue a capability against when run against a live `pnpm --filter
+ * broker dev` (or `dev:live`) server.
  *
  * Modeled directly on `seed-live-verification.ts` (PR #64) — same
  * idempotency guarantees, same self-transfer convention — kept as a
@@ -14,11 +14,10 @@
  * `seedRegistry`/`createTask`) is not duplicated — this only supplies
  * different data to it.
  *
- * IMPORTANT — working directory matters: registry.ts/budget.ts resolve
- * `config.dbPath` relative to the CURRENT WORKING DIRECTORY, not this
- * file's location. Run this from `apps/broker/` (or with `DB_PATH` set to
- * match) so it writes to the exact same `broker.db` the live server has
- * open.
+ * IMPORTANT: make sure `DATABASE_URL` names the exact same Postgres
+ * instance/database the live server has open — this script and that
+ * server must agree on it (env vars, not a relative file path, so there's
+ * no "run from the right directory" concern the old SQLite version had).
  *
  * Idempotent: `resourceId` and the derived `taskHash` are both PRIMARY
  * KEYs in their tables; this script checks `getResourceById`/`getTask`
@@ -90,12 +89,12 @@ function requireEnv(name: string): string {
  * Returns the taskHash, since callers that go on to look up settlement
  * outcomes by taskHash (6.1c) would otherwise have to recompute it.
  */
-export function ensureSeeded(): { readonly taskHash: string } {
+export async function ensureSeeded(): Promise<{ readonly taskHash: string }> {
   const recipient = requireEnv("HEDERA_TESTNET_ACCOUNT_ID");
   const taskHash = hashCanonical(LIVE_AGENT_RUN_TASK_DEFINITION);
 
-  if (getResourceById(LIVE_AGENT_RUN_RESOURCE_ID) === undefined) {
-    seedRegistry([
+  if ((await getResourceById(LIVE_AGENT_RUN_RESOURCE_ID)) === undefined) {
+    await seedRegistry([
       { resourceId: LIVE_AGENT_RUN_RESOURCE_ID, recipient, price: LIVE_AGENT_RUN_PRICE },
     ]);
     console.log(
@@ -105,19 +104,19 @@ export function ensureSeeded(): { readonly taskHash: string } {
     console.log(`Resource registry entry ${LIVE_AGENT_RUN_RESOURCE_ID} already exists — skipping.`);
   }
 
-  if (getTask(taskHash) === undefined) {
-    createTask(taskHash, LIVE_AGENT_RUN_BUDGET, LIVE_AGENT_RUN_RESOURCE_ID);
+  if ((await getTask(taskHash)) === undefined) {
+    await createTask(taskHash, LIVE_AGENT_RUN_BUDGET, LIVE_AGENT_RUN_RESOURCE_ID);
     console.log(`Created task budget ${taskHash} (maxTotalSpend=${LIVE_AGENT_RUN_BUDGET})`);
   } else {
-    increaseTaskBudget(taskHash, LIVE_AGENT_RUN_BUDGET);
+    await increaseTaskBudget(taskHash, LIVE_AGENT_RUN_BUDGET);
     console.log(`Task budget ${taskHash} already exists — ensured maxTotalSpend >= ${LIVE_AGENT_RUN_BUDGET}.`);
   }
 
   return { taskHash };
 }
 
-function main(): void {
-  ensureSeeded();
+async function main(): Promise<void> {
+  await ensureSeeded();
   console.log(
     "\nSeeding complete. Run the live agent entrypoint from apps/sandbox/:\n" +
       "  pnpm --filter sandbox dev:live\n" +
@@ -129,5 +128,5 @@ function main(): void {
 // e2e-live-demo.ts must not also trigger this file's own standalone
 // output.
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main();
+  await main();
 }

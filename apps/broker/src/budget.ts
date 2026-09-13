@@ -1,5 +1,6 @@
 import { taskSchema, type Task } from "@paybound/capability-spec";
-import { db } from "./db.js";
+import type { PoolClient } from "pg";
+import { pool, withTransaction } from "./db.js";
 import { addDecimalStrings, compareDecimalStrings } from "./decimal.js";
 
 /**
@@ -7,7 +8,7 @@ import { addDecimalStrings, compareDecimalStrings } from "./decimal.js";
  * "0" and is only ever advanced through tryReserveBudget's atomic
  * check-then-update transaction below.
  */
-db.exec(`
+await pool.query(`
   CREATE TABLE IF NOT EXISTS tasks (
     task_hash       TEXT PRIMARY KEY,
     max_total_spend TEXT NOT NULL,
@@ -23,15 +24,11 @@ db.exec(`
 // budget.ts/issue.ts-only state). NULL for tasks created directly (e.g.
 // existing test helpers that call createTask() without going through
 // POST /issue) — see getTaskResourceId()'s doc comment for how that's
-// treated. Safe ALTER TABLE ADD COLUMN migration, same pattern as
-// state-machine.ts's hedera_transaction_id — a no-op on subsequent
-// startups, since SQLite throws (caught below) on a column that already
-// exists.
-try {
-  db.exec("ALTER TABLE tasks ADD COLUMN resource_id TEXT");
-} catch {
-  // Column already exists — safe to ignore.
-}
+// treated. `ADD COLUMN IF NOT EXISTS` is native, idempotent Postgres DDL —
+// unlike SQLite, which has no such clause and required a try/catch around
+// a plain ADD COLUMN to tolerate a second startup finding the column
+// already there.
+await pool.query("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS resource_id TEXT");
 
 interface TaskRow {
   task_hash: string;
@@ -51,26 +48,6 @@ function rowToTask(row: TaskRow): Task {
   };
 }
 
-const insertStatement = db.prepare<[string, string, string, string | null]>(
-  "INSERT INTO tasks (task_hash, max_total_spend, spent_so_far, resource_id) VALUES (?, ?, ?, ?)",
-);
-
-const selectByTaskHashStatement = db.prepare<[string], TaskRow>(
-  "SELECT task_hash, max_total_spend, spent_so_far FROM tasks WHERE task_hash = ?",
-);
-
-const selectResourceIdByTaskHashStatement = db.prepare<[string], TaskResourceRow>(
-  "SELECT resource_id FROM tasks WHERE task_hash = ?",
-);
-
-const updateSpentSoFarStatement = db.prepare<[string, string]>(
-  "UPDATE tasks SET spent_so_far = ? WHERE task_hash = ?",
-);
-
-const updateMaxTotalSpendStatement = db.prepare<[string, string]>(
-  "UPDATE tasks SET max_total_spend = ? WHERE task_hash = ?",
-);
-
 /**
  * Creates a new Task budget record with spentSoFar initialized to "0".
  * taskHash is the table's primary key, so creating a task whose taskHash
@@ -84,19 +61,25 @@ const updateMaxTotalSpendStatement = db.prepare<[string, string]>(
  * see getTaskResourceId()'s doc comment for how an unset binding is
  * treated by that check.
  */
-export function createTask(
+export async function createTask(
   taskHash: Task["taskHash"],
   maxTotalSpend: Task["maxTotalSpend"],
   resourceId?: string,
-): void {
+): Promise<void> {
   const task = taskSchema.parse({ taskHash, maxTotalSpend, spentSoFar: "0" });
-  insertStatement.run(task.taskHash, task.maxTotalSpend, task.spentSoFar, resourceId ?? null);
+  await pool.query(
+    "INSERT INTO tasks (task_hash, max_total_spend, spent_so_far, resource_id) VALUES ($1, $2, $3, $4)",
+    [task.taskHash, task.maxTotalSpend, task.spentSoFar, resourceId ?? null],
+  );
 }
 
 /** Reads the current Task budget state. Returns undefined if no such task was created. */
-export function getTask(taskHash: Task["taskHash"]): Task | undefined {
-  const row = selectByTaskHashStatement.get(taskHash);
-  return row === undefined ? undefined : rowToTask(row);
+export async function getTask(taskHash: Task["taskHash"]): Promise<Task | undefined> {
+  const result = await pool.query<TaskRow>(
+    "SELECT task_hash, max_total_spend, spent_so_far FROM tasks WHERE task_hash = $1",
+    [taskHash],
+  );
+  return result.rows[0] === undefined ? undefined : rowToTask(result.rows[0]);
 }
 
 /**
@@ -118,44 +101,82 @@ export function getTask(taskHash: Task["taskHash"]): Task | undefined {
  *    `/issue` call for the same `taskHash` naming a *different*
  *    resourceId (`TASK_RESOURCE_MISMATCH`), and allows the same one.
  */
-export function getTaskResourceId(taskHash: Task["taskHash"]): string | null | undefined {
-  const row = selectResourceIdByTaskHashStatement.get(taskHash);
-  return row === undefined ? undefined : row.resource_id;
+export async function getTaskResourceId(taskHash: Task["taskHash"]): Promise<string | null | undefined> {
+  const result = await pool.query<TaskResourceRow>("SELECT resource_id FROM tasks WHERE task_hash = $1", [
+    taskHash,
+  ]);
+  return result.rows[0] === undefined ? undefined : result.rows[0].resource_id;
+}
+
+/**
+ * Locks the task row (`SELECT ... FOR UPDATE`), checks whether `amount`
+ * fits within the remaining budget, and if so applies the update — all on
+ * the CALLER's already-open transaction/client, so this composes inside a
+ * larger atomic operation. state-machine.ts's `reservePayment` does
+ * exactly this: it locks the `capabilities` row and this `tasks` row
+ * together in ONE transaction, so nonce-burn and budget-reservation still
+ * take effect atomically, matching the pre-migration guarantee.
+ *
+ * MUST be called from within an active `withTransaction` block on
+ * `client` — the lock is only meaningful (and only released) as part of
+ * that surrounding transaction. `tryReserveBudget` below is the
+ * self-contained version for standalone callers.
+ *
+ * Why `FOR UPDATE` and not the check-then-write shape the SQLite version
+ * used: on `better-sqlite3`, the read, the JS-side decimal comparison, and
+ * the write happened inside one synchronous, non-yielding function call —
+ * Node's single-threaded execution meant no other request's code could
+ * ever run in between, so two concurrent reservations against the same
+ * taskHash could never both observe the same starting spentSoFar. Postgres
+ * (and any async driver) has no such guarantee: `await`ing the SELECT
+ * yields control back to the event loop, so a second "concurrent" call
+ * could run its own SELECT against the same still-unmodified row before
+ * either commits — both would compute "this fits" and both would write,
+ * a real double-spend. `FOR UPDATE` locks the row at the SELECT itself, so
+ * a second transaction's own `SELECT ... FOR UPDATE` on the same row
+ * blocks until this one commits or rolls back, then reads the
+ * already-updated value — restoring the same "exactly one winner"
+ * property, now via Postgres's row lock instead of Node's single-threaded
+ * execution. Covered by property.test.ts's concurrent double-spend test.
+ */
+export async function reserveBudgetWithClient(
+  client: PoolClient,
+  taskHash: Task["taskHash"],
+  amount: Task["maxTotalSpend"],
+): Promise<boolean> {
+  const result = await client.query<TaskRow>(
+    "SELECT task_hash, max_total_spend, spent_so_far FROM tasks WHERE task_hash = $1 FOR UPDATE",
+    [taskHash],
+  );
+  const row = result.rows[0];
+  if (row === undefined) {
+    throw new Error(`tryReserveBudget: no task with taskHash "${taskHash}"`);
+  }
+
+  const newSpentSoFar = addDecimalStrings(row.spent_so_far, amount);
+  if (compareDecimalStrings(newSpentSoFar, row.max_total_spend) > 0) {
+    return false;
+  }
+
+  await client.query("UPDATE tasks SET spent_so_far = $1 WHERE task_hash = $2", [newSpentSoFar, taskHash]);
+  return true;
 }
 
 /**
  * Atomically checks and, if it fits, reserves `amount` against a task's
  * remaining budget: (spentSoFar + amount) <= maxTotalSpend
- * (SECURITY_INVARIANT.md clause 9, "Over-budget"). The read, the exact
- * decimal comparison, and the write all happen inside a single
- * better-sqlite3 transaction, so two calls against the same taskHash can
- * never both observe the same starting spentSoFar and both succeed —
- * better-sqlite3's synchronous, single-connection transaction model
- * provides this atomicity without any additional manual locking.
+ * (SECURITY_INVARIANT.md clause 9, "Over-budget"). Self-contained version
+ * of `reserveBudgetWithClient` for callers that only need the budget
+ * check on its own, in its own transaction — see that function's doc
+ * comment for how state-machine.ts composes the client-taking version
+ * into a larger atomic operation instead.
  *
  * Returns true and updates spentSoFar if the reservation fits; returns
  * false and makes no change otherwise. Throws if no task with `taskHash`
  * exists.
  */
-const reserveBudgetTransaction = db.transaction(
-  (taskHash: Task["taskHash"], amount: Task["maxTotalSpend"]): boolean => {
-    const row = selectByTaskHashStatement.get(taskHash);
-    if (row === undefined) {
-      throw new Error(`tryReserveBudget: no task with taskHash "${taskHash}"`);
-    }
-
-    const newSpentSoFar = addDecimalStrings(row.spent_so_far, amount);
-    if (compareDecimalStrings(newSpentSoFar, row.max_total_spend) > 0) {
-      return false;
-    }
-
-    updateSpentSoFarStatement.run(newSpentSoFar, taskHash);
-    return true;
-  },
-);
-
-export function tryReserveBudget(taskHash: Task["taskHash"], amount: Task["maxTotalSpend"]): boolean {
-  return reserveBudgetTransaction(taskHash, amount);
+export async function tryReserveBudget(taskHash: Task["taskHash"], amount: Task["maxTotalSpend"]): Promise<boolean> {
+  return withTransaction((client) => reserveBudgetWithClient(client, taskHash, amount));
 }
 
 /**
@@ -170,17 +191,29 @@ export function tryReserveBudget(taskHash: Task["taskHash"], amount: Task["maxTo
  * its own idempotency guarantee, so a task's budget would otherwise stay
  * frozen at whatever it was first seeded with). Not used by any
  * request-handling code path — `POST /issue` never changes an existing
- * task's budget once created.
+ * task's budget once created. Locks the row for consistency with
+ * `reserveBudgetWithClient` even though this path isn't concurrently
+ * contended in practice (dev/seed scripts only, never a concurrent
+ * request-handling caller).
  *
  * Throws if no task with `taskHash` exists.
  */
-export function increaseTaskBudget(taskHash: Task["taskHash"], newMaxTotalSpend: Task["maxTotalSpend"]): void {
-  const row = selectByTaskHashStatement.get(taskHash);
-  if (row === undefined) {
-    throw new Error(`increaseTaskBudget: no task with taskHash "${taskHash}"`);
-  }
-  if (compareDecimalStrings(newMaxTotalSpend, row.max_total_spend) <= 0) {
-    return;
-  }
-  updateMaxTotalSpendStatement.run(newMaxTotalSpend, taskHash);
+export async function increaseTaskBudget(taskHash: Task["taskHash"], newMaxTotalSpend: Task["maxTotalSpend"]): Promise<void> {
+  await withTransaction(async (client) => {
+    const result = await client.query<TaskRow>(
+      "SELECT task_hash, max_total_spend, spent_so_far FROM tasks WHERE task_hash = $1 FOR UPDATE",
+      [taskHash],
+    );
+    const row = result.rows[0];
+    if (row === undefined) {
+      throw new Error(`increaseTaskBudget: no task with taskHash "${taskHash}"`);
+    }
+    if (compareDecimalStrings(newMaxTotalSpend, row.max_total_spend) <= 0) {
+      return;
+    }
+    await client.query("UPDATE tasks SET max_total_spend = $1 WHERE task_hash = $2", [
+      newMaxTotalSpend,
+      taskHash,
+    ]);
+  });
 }

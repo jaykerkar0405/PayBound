@@ -95,7 +95,7 @@ export async function settleAndRecord(
   // BEFORE attempting dispatch below, not after — see
   // markProvisionallyRecoverable()'s doc comment in state-machine.ts for
   // the full reasoning and why this doesn't introduce a new race.
-  markProvisionallyRecoverable(submitted.capability.nonce);
+  await markProvisionallyRecoverable(submitted.capability.nonce);
 
   let outcome: SubmissionOutcome;
   let transactionId: string | undefined;
@@ -112,7 +112,7 @@ export async function settleAndRecord(
     // Gap 1 fix: persist the transaction ID immediately — before receipt
     // confirmation — so a broker crash/restart can still reconcile this
     // payment via sweepRecoverablePayments().
-    persistHederaTxId(submitted.capability.nonce, transactionId);
+    await persistHederaTxId(submitted.capability.nonce, transactionId);
 
     if (outcome === "unknown") {
       try {
@@ -133,7 +133,7 @@ export async function settleAndRecord(
     );
   }
 
-  resolveSubmission(submitted, outcome);
+  await resolveSubmission(submitted, outcome);
 
   if (transactionId !== undefined) {
     try {
@@ -178,7 +178,7 @@ export async function sweepRecoverablePayments(
 ): Promise<void> {
   if (!isSettlementConfigured()) return;
 
-  const recoverable = getRecoverableSubmissions();
+  const recoverable = await getRecoverableSubmissions();
   if (recoverable.length === 0) return;
 
   console.log(`[AUDIT] reconciliation: sweeping ${recoverable.length} RECOVERABLE payment(s) on startup`);
@@ -186,7 +186,7 @@ export async function sweepRecoverablePayments(
   for (const { nonce, hederaTxId } of recoverable) {
     try {
       const result = await deps.queryHederaTransactionReceipt(hederaTxId);
-      resolveRecoverableByNonce(nonce, result.outcome);
+      await resolveRecoverableByNonce(nonce, result.outcome);
       console.log(
         `[AUDIT] reconciliation: resolved nonce ${nonce.slice(0, 8)}… → ${result.outcome} ` +
           `(tx: ${hederaTxId}, status: ${result.status})`,

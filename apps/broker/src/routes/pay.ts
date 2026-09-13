@@ -42,7 +42,7 @@ payRoute.post(
   async (c) => {
     const { capabilityId } = c.req.valid("json");
 
-    const record = getCapabilityRecord(capabilityId);
+    const record = await getCapabilityRecord(capabilityId);
     if (record === undefined) {
       return c.json({ error: "capability_not_found", capabilityId }, 404);
     }
@@ -70,7 +70,7 @@ payRoute.post(
       );
     }
 
-    const task = getTask(record.capability.taskHash);
+    const task = await getTask(record.capability.taskHash);
     if (task === undefined) {
       throw new Error(
         `pay: no task budget record for taskHash "${record.capability.taskHash}" (capability issued without a corresponding task)`,
@@ -86,7 +86,7 @@ payRoute.post(
       paymentRequestHash: record.capability.paymentRequestHash,
     };
 
-    const result = authorize({ payment, capability: record.capability, task });
+    const result = await authorize({ payment, capability: record.capability, task });
 
     // Fire-and-forget HCS audit log (task 4.2) — logged for every decision,
     // authorized or not; never awaited, never able to affect the response.

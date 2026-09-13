@@ -50,12 +50,21 @@
  * already-issued capability's expiry into the past. `POST /issue`'s expiry is fixed
  * (issuer.ts's CAPABILITY_TTL_MS, 5 minutes) and not caller-settable, so waiting for a
  * real expiry would make this suite take 5+ minutes. Worked around by writing directly
- * to the same underlying SQLite file's `capabilities.expiry` column via a short-lived
- * one-off script (see `forceExpireCapability` below) — the same trick apps/broker's own
+ * to the broker's own Postgres `capabilities.expiry` column via a short-lived one-off
+ * script (see `forceExpireCapability` below) — the same trick apps/broker's own
  * pay-route.test.ts/property.test.ts use in-process for identical reasons. This doesn't
  * fake the authorize() decision itself (that's still made by the real running broker,
  * reading the real row, evaluating the real clause) — it only sets up state the public
  * API has no fast way to express.
+ *
+ * DATABASE_URL: the spawned broker requires one (Postgres, see
+ * apps/broker/src/config.ts) — this suite shares whatever Postgres
+ * `process.env.DATABASE_URL` already points at (same one apps/broker's
+ * own test suite uses) rather than provisioning an isolated database per
+ * run the way the old SQLite-temp-file version did. Every resourceId/
+ * taskDefinition/capabilityId this file creates is freshly randomUUID()'d,
+ * so sharing one Postgres instance across runs carries the same
+ * negligible collision risk apps/broker's own tests already accept.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -91,14 +100,14 @@ function getFreePort(): Promise<number> {
   });
 }
 
-/** Writes `code` to a temp .mjs file and runs it via tsx, with DB_PATH set to the shared test DB. Used for the registry seed and the expiry backdoor — both need direct access to the broker's own modules, which only a process rooted at BROKER_DIR (or absolute-path imports, used here) can resolve. */
-async function runBrokerScript(dbPath: string, code: string): Promise<string> {
+/** Writes `code` to a temp .mjs file and runs it via tsx, inheriting DATABASE_URL from this process's own environment. Used for the registry seed and the expiry backdoor — both need direct access to the broker's own modules, which only a process rooted at BROKER_DIR (or absolute-path imports, used here) can resolve. */
+async function runBrokerScript(code: string): Promise<string> {
   const scriptPath = resolve(tmpdir(), `paybound-scenario3-script-${randomUUID()}.mjs`);
   await writeFile(scriptPath, code);
   try {
     const { stdout } = await execFileAsync("node", ["--import", "tsx/esm", scriptPath], {
       cwd: BROKER_DIR,
-      env: { ...process.env, DB_PATH: dbPath },
+      env: process.env,
     });
     return stdout;
   } finally {
@@ -171,13 +180,18 @@ describe("Attack Scenario 3 — Replay and Reuse of a Capability (Task 2.8)", ()
   let brokerProcess: ChildProcess;
   let brokerOutput = "";
   let baseUrl: string;
-  let dbPath: string;
   let sharedResourceId: string;
 
   beforeAll(async () => {
+    if (!process.env.DATABASE_URL) {
+      throw new Error(
+        "attack-scenario-3-replay.test.ts: DATABASE_URL is not set — this suite spawns a real " +
+          "broker, which requires a Postgres connection string (see apps/broker/.env.example).",
+      );
+    }
+
     const port = await getFreePort();
     baseUrl = `http://127.0.0.1:${port}`;
-    dbPath = resolve(tmpdir(), `paybound-scenario3-${randomUUID()}.db`);
     sharedResourceId = randomUUID();
 
     // Seed the one resource every capability in this file issues against.
@@ -186,14 +200,15 @@ describe("Attack Scenario 3 — Replay and Reuse of a Capability (Task 2.8)", ()
     // budget sharing (task 6.x follow-up: one resource per task, but
     // many independent tasks may reference the same resource).
     await runBrokerScript(
-      dbPath,
       `
       import { seedRegistry } from "${BROKER_DIR}/src/registry.js";
-      seedRegistry([{
+      import { pool } from "${BROKER_DIR}/src/db.js";
+      await seedRegistry([{
         resourceId: ${JSON.stringify(sharedResourceId)},
         recipient: ${JSON.stringify(LEGITIMATE_RECIPIENT)},
         price: ${JSON.stringify(LEGITIMATE_AMOUNT)},
       }]);
+      await pool.end();
       `,
     );
 
@@ -202,7 +217,6 @@ describe("Attack Scenario 3 — Replay and Reuse of a Capability (Task 2.8)", ()
       env: {
         ...process.env,
         PORT: String(port),
-        DB_PATH: dbPath,
         LEDGER_SIGNING_ENABLED: "false",
         NODE_ENV: "test",
       },
@@ -231,11 +245,8 @@ describe("Attack Scenario 3 — Replay and Reuse of a Capability (Task 2.8)", ()
     }
   }, 30_000);
 
-  afterAll(async () => {
+  afterAll(() => {
     brokerProcess?.kill("SIGTERM");
-    await Promise.all(
-      ["", "-shm", "-wal"].map((suffix) => rm(`${dbPath}${suffix}`, { force: true })),
-    );
   });
 
   /** Issues one real capability via POST /issue against the spawned broker, with a fresh taskDefinition so it gets its own independent task/budget. */
@@ -260,7 +271,7 @@ describe("Attack Scenario 3 — Replay and Reuse of a Capability (Task 2.8)", ()
 
   /**
    * Forces an already-issued capability's expiry into the past by writing
-   * directly to the broker's own SQLite file — POST /issue has no
+   * directly to the broker's own Postgres row — POST /issue has no
    * caller-settable expiry (see this file's top doc comment for why).
    * Does not fake the STALE_NONCE decision itself: authorize() still reads
    * this same row from the real running broker and evaluates the real
@@ -268,13 +279,13 @@ describe("Attack Scenario 3 — Replay and Reuse of a Capability (Task 2.8)", ()
    */
   async function forceExpireCapability(capabilityId: CapabilityId): Promise<void> {
     await runBrokerScript(
-      dbPath,
       `
-      import { db } from "${BROKER_DIR}/src/db.js";
-      db.prepare("UPDATE capabilities SET expiry = ? WHERE capability_id = ?").run(
-        new Date(Date.now() - 60_000).toISOString(),
-        ${JSON.stringify(capabilityId)},
+      import { pool } from "${BROKER_DIR}/src/db.js";
+      await pool.query(
+        "UPDATE capabilities SET expiry = $1 WHERE capability_id = $2",
+        [new Date(Date.now() - 60_000).toISOString(), ${JSON.stringify(capabilityId)}],
       );
+      await pool.end();
       `,
     );
   }
