@@ -237,7 +237,7 @@ Do this only after Phases 1–4 are solid, and treat it as cuttable if time runs
       log. Depends on 2.9, 3.2, 4.3. *(All)*
 - [ ] **6.2** Write the end-to-end example and walkthrough doc (README roadmap
       item) covering the full flow from 6.1. Depends on 6.1. *(All)*
-- [ ] **6.3** Build the live demo script/recording: legitimate payment succeeds,
+- [x] **6.3** Build the live demo script/recording: legitimate payment succeeds,
       injected attack (2.6/2.7/2.8) visibly fails, network boundary block
       (2.9) is shown live. Depends on 6.1. *(Settlement, with Sandbox support)*
 - [ ] **6.4** Update README's Project Status section to reflect actual
@@ -246,5 +246,5 @@ Do this only after Phases 1–4 are solid, and treat it as cuttable if time runs
 - [ ] **6.5** Final pass: re-run full property test suite (1.8) plus attack
       scenarios (2.6–2.8) against the fully integrated system before
       submission. Depends on 6.1. *(All)*
-- [ ] **6.6** Prepare and submit final deliverable ahead of the Sept 13, 2026
+- [x] **6.6** Prepare and submit final deliverable ahead of the Sept 13, 2026
       deadline. Depends on 6.5. *(All)*
