@@ -378,7 +378,20 @@ async function runOnce(brokerBase: string): Promise<{ result: RunAgentLoopResult
   }
 
   let entry;
-  while ((entry = geminiKeyPool.nextAvailable())) {
+  // A non-quota ("other") failure deliberately leaves the key's persistent
+  // pool status untouched (see gemini-key-pool.ts) — it isn't a quota
+  // problem, so it shouldn't be marked cooling/exhausted. But without
+  // excluding it for the rest of THIS round, nextAvailable() would just
+  // return the same still-"available" key again on the next iteration:
+  // an unbounded tight loop re-running a real attestation handshake, a
+  // real capability issuance (a real HCS message), and a real billed
+  // Gemini call every iteration, never actually reaching the next
+  // configured key or falling through to Groq — bounded only by the
+  // outer AGENT_TIMEOUT_MS killing the whole process. `triedThisRound`
+  // is what makes "trying next key" in the logs below actually true.
+  const triedThisRound = new Set<number>();
+  while ((entry = geminiKeyPool.nextAvailable(triedThisRound))) {
+    triedThisRound.add(entry.index);
     console.log(`Model: Gemini #${entry.index} "${GEMINI_MODEL_ID}" (real API calls — billed)`);
     try {
       const result = await runLifecycleWithModel(buildGeminiModelForKey(entry.key), brokerBase);

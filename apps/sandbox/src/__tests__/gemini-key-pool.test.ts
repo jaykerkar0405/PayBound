@@ -146,4 +146,29 @@ describe("createGeminiKeyPool", () => {
     expect(pool.size).toBe(0);
     expect(pool.nextAvailable()).toBeUndefined();
   });
+
+  it("does not change a key's status on a non-quota error, but exclude still moves the caller to the next key", () => {
+    // A non-quota ("other") error is not this pool's concern to track —
+    // reportRpmExhausted/reportRpdExhausted are never called for it, by
+    // design (see nextAvailable's doc comment). The caller (live-run.ts's
+    // runOnce) is responsible for tracking already-tried indices within
+    // its own round via `exclude`, or the same key would be returned
+    // again forever since nothing here ever marks it unavailable.
+    const pool = createGeminiKeyPool(["key-a", "key-b"]);
+    const tried = new Set<number>();
+
+    const first = pool.nextAvailable(tried);
+    expect(first).toEqual({ index: 1, key: "key-a" });
+    tried.add(1); // simulates runOnce recording a non-quota failure on key 1
+
+    const second = pool.nextAvailable(tried);
+    expect(second).toEqual({ index: 2, key: "key-b" });
+    tried.add(2);
+
+    expect(pool.nextAvailable(tried)).toBeUndefined(); // every key tried once this round — fall through to Groq
+
+    // Key 1's actual pool status was never touched by the non-quota error —
+    // a FRESH round (fresh exclude set) sees it as available again.
+    expect(pool.nextAvailable()).toEqual({ index: 1, key: "key-a" });
+  });
 });
