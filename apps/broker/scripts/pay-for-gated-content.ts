@@ -102,17 +102,17 @@ export async function checkGatedContentServiceReachable(url: string): Promise<vo
 const GATED_CONTENT_BUDGET_HBAR = "1";
 
 /** Idempotently seeds the registry entry + task budget for the gated-content purchase, matching seed-live-agent-run.ts's convention. */
-function ensureGatedContentSeeded(payTo: string, priceHbar: string): { readonly taskHash: string } {
+async function ensureGatedContentSeeded(payTo: string, priceHbar: string): Promise<{ readonly taskHash: string }> {
   const taskHash = hashCanonical(GATED_CONTENT_TASK_DEFINITION);
 
-  if (getResourceById(GATED_CONTENT_RESOURCE_ID) === undefined) {
-    seedRegistry([{ resourceId: GATED_CONTENT_RESOURCE_ID, recipient: payTo, price: priceHbar }]);
+  if ((await getResourceById(GATED_CONTENT_RESOURCE_ID)) === undefined) {
+    await seedRegistry([{ resourceId: GATED_CONTENT_RESOURCE_ID, recipient: payTo, price: priceHbar }]);
   }
 
-  if (getTask(taskHash) === undefined) {
-    createTask(taskHash, GATED_CONTENT_BUDGET_HBAR, GATED_CONTENT_RESOURCE_ID);
+  if ((await getTask(taskHash)) === undefined) {
+    await createTask(taskHash, GATED_CONTENT_BUDGET_HBAR, GATED_CONTENT_RESOURCE_ID);
   } else {
-    increaseTaskBudget(taskHash, GATED_CONTENT_BUDGET_HBAR);
+    await increaseTaskBudget(taskHash, GATED_CONTENT_BUDGET_HBAR);
   }
 
   return { taskHash };
@@ -141,9 +141,9 @@ export async function payForGatedContent(): Promise<PayForGatedContentResult> {
   const { url, payTo, priceHbar } = gatedContentConfig();
   await checkGatedContentServiceReachable(url);
 
-  const { taskHash } = ensureGatedContentSeeded(payTo, priceHbar);
+  const { taskHash } = await ensureGatedContentSeeded(payTo, priceHbar);
 
-  const issued = issueCapability({
+  const issued = await issueCapability({
     taskDefinition: GATED_CONTENT_TASK_DEFINITION,
     resourceId: GATED_CONTENT_RESOURCE_ID,
     exactAmount: priceHbar,
@@ -151,12 +151,12 @@ export async function payForGatedContent(): Promise<PayForGatedContentResult> {
     session: "broker-operator",
   });
 
-  const record = getCapabilityRecord(issued.capabilityId);
+  const record = await getCapabilityRecord(issued.capabilityId);
   if (record === undefined) {
     throw new Error(`payForGatedContent: capability ${issued.capabilityId} was issued but is not readable back`);
   }
 
-  const task = getTask(taskHash);
+  const task = await getTask(taskHash);
   if (task === undefined) {
     throw new Error(`payForGatedContent: no task budget record for taskHash "${taskHash}"`);
   }
@@ -170,7 +170,7 @@ export async function payForGatedContent(): Promise<PayForGatedContentResult> {
     paymentRequestHash: record.capability.paymentRequestHash,
   };
 
-  const authResult = authorize({ payment, capability: record.capability, task });
+  const authResult = await authorize({ payment, capability: record.capability, task });
   if (!authResult.authorized) {
     throw new Error(`payForGatedContent: Broker.authorize rejected this payment: ${authResult.reason}`);
   }

@@ -6,7 +6,7 @@ import {
   type CapabilityId,
   type ResourceRegistryEntry,
 } from "@paybound/capability-spec";
-import { db } from "./db.js";
+import { pool } from "./db.js";
 import { getResourceById } from "./registry.js";
 import { canonicalize, hashCanonical } from "./hash.js";
 import { stubSign } from "./signer.js";
@@ -19,7 +19,7 @@ import { auditCapabilityIssued } from "./hcs-audit.js";
  * capability_id vs. nonce"), the stub signature, and a consumed flag that
  * later tasks (1.5/1.6) burn atomically at the RESERVED transition.
  */
-db.exec(`
+await pool.query(`
   CREATE TABLE IF NOT EXISTS capabilities (
     capability_id          TEXT PRIMARY KEY,
     task_hash               TEXT NOT NULL,
@@ -80,19 +80,6 @@ function rowToRecord(row: CapabilityRow): CapabilityRecord {
   };
 }
 
-const insertStatement = db.prepare<
-  [string, string, string, string, string, string, string, string, string, number, string, number]
->(`
-  INSERT INTO capabilities (
-    capability_id, task_hash, resource_id, recipient, exact_amount,
-    payment_request_hash, session, nonce, expiry, max_uses, signature, consumed
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`);
-
-const selectByCapabilityIdStatement = db.prepare<[string], CapabilityRow>(
-  "SELECT * FROM capabilities WHERE capability_id = ?",
-);
-
 /** Capabilities are short-lived by default (CAPABILITY_SPEC.md); fixed, not caller-configurable. */
 const CAPABILITY_TTL_MS = 5 * 60 * 1000;
 
@@ -126,11 +113,11 @@ export interface IssueCapabilityResult {
  * state-machine.ts's `submitPayment(reserved, signer)`) purely so tests
  * can assert on the exact event without mocking any module.
  */
-export function issueCapability(
+export async function issueCapability(
   input: IssueCapabilityInput,
   auditFn: typeof auditCapabilityIssued = auditCapabilityIssued,
-): IssueCapabilityResult {
-  const resource = getResourceById(input.resourceId);
+): Promise<IssueCapabilityResult> {
+  const resource = await getResourceById(input.resourceId);
   if (resource === undefined) {
     throw new Error(
       `issueCapability: resourceId "${input.resourceId}" is not a known resource registry entry`,
@@ -163,19 +150,25 @@ export function issueCapability(
 
   const signature = stubSign(canonicalize(capability));
 
-  insertStatement.run(
-    capabilityId,
-    capability.taskHash,
-    capability.resourceId,
-    capability.recipient,
-    capability.exactAmount,
-    capability.paymentRequestHash,
-    capability.session,
-    capability.nonce,
-    capability.expiry,
-    capability.maxUses,
-    signature,
-    0,
+  await pool.query(
+    `INSERT INTO capabilities (
+      capability_id, task_hash, resource_id, recipient, exact_amount,
+      payment_request_hash, session, nonce, expiry, max_uses, signature, consumed
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    [
+      capabilityId,
+      capability.taskHash,
+      capability.resourceId,
+      capability.recipient,
+      capability.exactAmount,
+      capability.paymentRequestHash,
+      capability.session,
+      capability.nonce,
+      capability.expiry,
+      capability.maxUses,
+      signature,
+      0,
+    ],
   );
 
   void auditFn({
@@ -194,7 +187,9 @@ export function issueCapability(
 }
 
 /** Reads back a full persisted capability record, for use by later tasks (1.5/1.6) and tests. */
-export function getCapabilityRecord(capabilityId: CapabilityId): CapabilityRecord | undefined {
-  const row = selectByCapabilityIdStatement.get(capabilityId);
-  return row === undefined ? undefined : rowToRecord(row);
+export async function getCapabilityRecord(capabilityId: CapabilityId): Promise<CapabilityRecord | undefined> {
+  const result = await pool.query<CapabilityRow>("SELECT * FROM capabilities WHERE capability_id = $1", [
+    capabilityId,
+  ]);
+  return result.rows[0] === undefined ? undefined : rowToRecord(result.rows[0]);
 }

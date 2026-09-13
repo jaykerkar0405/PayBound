@@ -184,7 +184,7 @@ Then, in another terminal:
 pnpm --filter broker dev   # or: pnpm --filter broker build && pnpm --filter broker start
 ```
 
-`GET /health`, `POST /issue`, and `POST /pay` are the three HTTP routes. `POST /issue` accepts `{ taskDefinition, resourceId, exactAmount, paymentRequest, session }`, atomically creates the task budget on first call for a given task hash, and returns `{ capabilityId, expiry }`. See `apps/broker/src/routes/issue.ts` and `apps/broker/src/__tests__/issue-route.test.ts` for the full schema and worked examples. To seed the resource registry before issuing, call `seedRegistry` from a one-off script pointed at the broker's `DB_PATH` (see `apps/broker/src/scripts/` for examples).
+`GET /health`, `POST /issue`, and `POST /pay` are the three HTTP routes. `POST /issue` accepts `{ taskDefinition, resourceId, exactAmount, paymentRequest, session }`, atomically creates the task budget on first call for a given task hash, and returns `{ capabilityId, expiry }`. See `apps/broker/src/routes/issue.ts` and `apps/broker/src/__tests__/issue-route.test.ts` for the full schema and worked examples. To seed the resource registry before issuing, call `seedRegistry` from a one-off script pointed at the broker's `DATABASE_URL` (see `apps/broker/scripts/` for examples).
 
 Without a running Speculos instance (and with `LEDGER_SIGNING_ENABLED` left at its default `true`), both `pnpm --filter broker test` and any real `POST /pay` call will fail — the test suite fails fast with an explicit error; a live `/pay` call instead hangs until the signer's own timeout and then returns a 500. Set `LEDGER_SIGNING_ENABLED=false` to fall back to the Phase 1 stub signer if you don't need real signing.
 

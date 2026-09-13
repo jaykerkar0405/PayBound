@@ -14,7 +14,16 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "outputs": ["coverage/**"]
+      "outputs": ["coverage/**"],
+      // apps/broker's test suite needs a real Postgres to connect to
+      // (see apps/broker/src/config.ts) — Turbo's default env mode
+      // doesn't pass arbitrary environment variables through to a task
+      // unless the task declares which ones it needs, so without this
+      // DATABASE_URL silently never reaches `vitest run`, even though
+      // it's genuinely set in the parent shell (confirmed: `pnpm test`
+      // run directly sees it fine; `pnpm turbo run test` did not, until
+      // this declaration was added).
+      "env": ["DATABASE_URL"]
     },
     "check-types": {
       "dependsOn": ["^build"]

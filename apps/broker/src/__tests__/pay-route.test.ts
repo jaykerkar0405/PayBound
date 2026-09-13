@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { app } from "../index.js";
-import { db } from "../db.js";
+import { pool } from "../db.js";
 import { seedRegistry } from "../registry.js";
 import { createTask } from "../budget.js";
 import { issueCapability } from "../issuer.js";
@@ -15,15 +15,15 @@ async function postPay(body: unknown) {
   });
 }
 
-function setUpCapability(overrides: { price?: string; maxTotalSpend?: string } = {}) {
+async function setUpCapability(overrides: { price?: string; maxTotalSpend?: string } = {}) {
   const taskHash = hashCanonical(randomUUID());
   const resourceId = randomUUID();
   const price = overrides.price ?? "10.00";
 
-  seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price }]);
-  createTask(hashCanonical({ taskHash }), overrides.maxTotalSpend ?? "100.00");
+  await seedRegistry([{ resourceId, recipient: "0xRECIPIENT", price }]);
+  await createTask(hashCanonical({ taskHash }), overrides.maxTotalSpend ?? "100.00");
 
-  const issued = issueCapability({
+  const issued = await issueCapability({
     taskDefinition: { taskHash },
     resourceId,
     exactAmount: price,
@@ -34,11 +34,11 @@ function setUpCapability(overrides: { price?: string; maxTotalSpend?: string } =
   return issued.capabilityId;
 }
 
-function expireCapability(capabilityId: string) {
-  db.prepare("UPDATE capabilities SET expiry = ? WHERE capability_id = ?").run(
+async function expireCapability(capabilityId: string) {
+  await pool.query("UPDATE capabilities SET expiry = $1 WHERE capability_id = $2", [
     new Date(Date.now() - 60_000).toISOString(),
     capabilityId,
-  );
+  ]);
 }
 
 function containsKey(value: unknown, key: string): boolean {
@@ -79,7 +79,7 @@ describe("POST /pay", () => {
   });
 
   it("returns 200 with a SUBMITTED state for a valid, freshly issued capability, with the reservedFrom/issuedFrom chain present", async () => {
-    const capabilityId = setUpCapability();
+    const capabilityId = await setUpCapability();
 
     const res = await postPay({ capabilityId });
 
@@ -93,7 +93,7 @@ describe("POST /pay", () => {
   });
 
   it("returns 200 with REPLAY when the same capabilityId is posted a second time", async () => {
-    const capabilityId = setUpCapability();
+    const capabilityId = await setUpCapability();
     await postPay({ capabilityId });
 
     const res = await postPay({ capabilityId });
@@ -103,8 +103,8 @@ describe("POST /pay", () => {
   });
 
   it("returns 200 with STALE_NONCE for an expired capability", async () => {
-    const capabilityId = setUpCapability();
-    expireCapability(capabilityId);
+    const capabilityId = await setUpCapability();
+    await expireCapability(capabilityId);
 
     const res = await postPay({ capabilityId });
 
@@ -113,7 +113,7 @@ describe("POST /pay", () => {
   });
 
   it("returns 200 with BUDGET_EXCEEDED when the task's budget is already exhausted", async () => {
-    const capabilityId = setUpCapability({ price: "10.00", maxTotalSpend: "5.00" });
+    const capabilityId = await setUpCapability({ price: "10.00", maxTotalSpend: "5.00" });
 
     const res = await postPay({ capabilityId });
 
@@ -122,7 +122,7 @@ describe("POST /pay", () => {
   });
 
   it("never includes a nonce field anywhere in a successful pay response (regression guard — enforced structurally by PublicPaymentState/publicSubmittedPaymentStateSchema, not a runtime strip step)", async () => {
-    const capabilityId = setUpCapability();
+    const capabilityId = await setUpCapability();
 
     const res = await postPay({ capabilityId });
     const body: unknown = await res.json();

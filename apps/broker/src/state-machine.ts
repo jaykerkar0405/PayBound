@@ -16,20 +16,24 @@ import {
   type FailedPaymentState,
   type Task,
 } from "@paybound/capability-spec";
-import { db } from "./db.js";
-import { tryReserveBudget } from "./budget.js";
+import { pool, withTransaction } from "./db.js";
+import { reserveBudgetWithClient } from "./budget.js";
 import { canonicalize } from "./hash.js";
 // Side-effect only: issuer.ts's top-level `CREATE TABLE IF NOT EXISTS
-// capabilities` must run before this module's own `db.prepare()` calls
-// below reference that table. ES modules evaluate each import's full
-// module graph before running the importer's own body, so this import
-// only has to appear somewhere in this file — but it has to exist. Without
-// it, whichever OTHER module happens to import this file first (e.g.
+// capabilities` must run before this module's own queries below reference
+// that table. ES modules evaluate each import's full module graph
+// (including any top-level await, as issuer.ts's CREATE TABLE now is)
+// before running the importer's own body, so this import only has to
+// appear somewhere in this file — but it has to exist. Without it,
+// whichever OTHER module happens to import this file first (e.g.
 // settlement.ts, which e2e-live-demo.ts imports before pay-for-gated-content.ts
 // ever reaches issuer.ts) silently determined whether `capabilities`
 // existed yet — working by accident on any dev machine whose broker.db
 // already had the table from an earlier run, and throwing
 // "SqliteError: no such table: capabilities" on a genuinely fresh database.
+// The same ordering hazard, and the same fix, apply identically under
+// Postgres — only the underlying error (and now, since CREATE TABLE is a
+// real awaited query, the exact race window) differs.
 import "./issuer.js";
 
 // ---------------------------------------------------------------------------
@@ -65,18 +69,6 @@ function rowToCapability(row: CapabilityRow): Capability {
   };
 }
 
-const selectCapabilityStatement = db.prepare<[string], CapabilityRow>(
-  "SELECT * FROM capabilities WHERE capability_id = ?",
-);
-
-const markConsumedStatement = db.prepare<[string]>(
-  "UPDATE capabilities SET consumed = 1 WHERE capability_id = ?",
-);
-
-const selectCapabilityIdByNonceStatement = db.prepare<[string], { capability_id: string }>(
-  "SELECT capability_id FROM capabilities WHERE nonce = ?",
-);
-
 /**
  * Looks up the externally-facing capabilityId for a given nonce. Used by
  * Broker.authorize (task 1.6), whose AuthorizePaymentInput carries the full
@@ -84,9 +76,12 @@ const selectCapabilityIdByNonceStatement = db.prepare<[string], { capability_id:
  * reservePayment is keyed by — nonce is unique in the capabilities table,
  * so this bridges the two.
  */
-export function getCapabilityIdByNonce(nonce: Capability["nonce"]): CapabilityId | undefined {
-  const row = selectCapabilityIdByNonceStatement.get(nonce);
-  return row === undefined ? undefined : capabilityIdSchema.parse(row.capability_id);
+export async function getCapabilityIdByNonce(nonce: Capability["nonce"]): Promise<CapabilityId | undefined> {
+  const result = await pool.query<{ capability_id: string }>(
+    "SELECT capability_id FROM capabilities WHERE nonce = $1",
+    [nonce],
+  );
+  return result.rows[0] === undefined ? undefined : capabilityIdSchema.parse(result.rows[0].capability_id);
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +92,7 @@ export function getCapabilityIdByNonce(nonce: Capability["nonce"]): CapabilityId
 // capabilityId.
 // ---------------------------------------------------------------------------
 
-db.exec(`
+await pool.query(`
   CREATE TABLE IF NOT EXISTS payment_submissions (
     nonce         TEXT PRIMARY KEY,
     signature     TEXT NOT NULL,
@@ -107,26 +102,9 @@ db.exec(`
 `);
 
 // Gap 1 fix: persist the Hedera transaction ID so a future reconciliation
-// sweep has something to query against. ALTER TABLE ADD COLUMN is a safe
-// no-op migration — SQLite never throws on a new column with NULL default,
-// but WILL throw if the column already exists, so we catch that case.
-try {
-  db.exec("ALTER TABLE payment_submissions ADD COLUMN hedera_transaction_id TEXT");
-} catch {
-  // Column already exists (subsequent broker startups) — safe to ignore.
-}
-
-const insertSubmissionStatement = db.prepare<[string, string, string]>(
-  "INSERT INTO payment_submissions (nonce, signature, submitted_at) VALUES (?, ?, ?)",
-);
-
-const updateSubmissionStatusStatement = db.prepare<[string, string]>(
-  "UPDATE payment_submissions SET status = ? WHERE nonce = ?",
-);
-
-const updateHederaTxIdStatement = db.prepare<[string, string]>(
-  "UPDATE payment_submissions SET hedera_transaction_id = ? WHERE nonce = ?",
-);
+// sweep has something to query against. `ADD COLUMN IF NOT EXISTS` is
+// native, idempotent Postgres DDL.
+await pool.query("ALTER TABLE payment_submissions ADD COLUMN IF NOT EXISTS hedera_transaction_id TEXT");
 
 /**
  * Persists the real Hedera transaction ID on a payment_submissions row so
@@ -136,8 +114,11 @@ const updateHederaTxIdStatement = db.prepare<[string, string]>(
  * `transactionId` is returned by `submitToHedera`, before any attempt to
  * confirm the receipt.
  */
-export function persistHederaTxId(nonce: string, hederaTxId: string): void {
-  updateHederaTxIdStatement.run(hederaTxId, nonce);
+export async function persistHederaTxId(nonce: string, hederaTxId: string): Promise<void> {
+  await pool.query("UPDATE payment_submissions SET hedera_transaction_id = $1 WHERE nonce = $2", [
+    hederaTxId,
+    nonce,
+  ]);
 }
 
 interface RecoverableRow {
@@ -145,18 +126,17 @@ interface RecoverableRow {
   hedera_transaction_id: string;
 }
 
-const selectRecoverableStatement = db.prepare<[], RecoverableRow>(
-  "SELECT nonce, hedera_transaction_id FROM payment_submissions WHERE status = 'RECOVERABLE' AND hedera_transaction_id IS NOT NULL",
-);
-
 /**
  * Returns all RECOVERABLE payment rows that have a persisted Hedera
  * transaction ID — i.e. payments that were dispatched to Hedera (so we
  * have something to reconcile against) but whose outcome was never
  * confirmed. Used by `sweepRecoverablePayments` on broker startup.
  */
-export function getRecoverableSubmissions(): { nonce: string; hederaTxId: string }[] {
-  return selectRecoverableStatement.all().map((r) => ({
+export async function getRecoverableSubmissions(): Promise<{ nonce: string; hederaTxId: string }[]> {
+  const result = await pool.query<RecoverableRow>(
+    "SELECT nonce, hedera_transaction_id FROM payment_submissions WHERE status = 'RECOVERABLE' AND hedera_transaction_id IS NOT NULL",
+  );
+  return result.rows.map((r) => ({
     nonce: r.nonce,
     hederaTxId: r.hedera_transaction_id,
   }));
@@ -168,11 +148,14 @@ export function getRecoverableSubmissions(): { nonce: string; hederaTxId: string
  * startup reconciliation, where the in-memory state is gone and only the
  * DB row remains.
  */
-export function resolveRecoverableByNonce(
+export async function resolveRecoverableByNonce(
   nonce: string,
   outcome: "settled" | "failed",
-): void {
-  updateSubmissionStatusStatement.run(outcome === "settled" ? "SETTLED" : "FAILED", nonce);
+): Promise<void> {
+  await pool.query("UPDATE payment_submissions SET status = $1 WHERE nonce = $2", [
+    outcome === "settled" ? "SETTLED" : "FAILED",
+    nonce,
+  ]);
 }
 
 /**
@@ -219,8 +202,8 @@ export function resolveRecoverableByNonce(
  *   row exists at all) is not fixed by this change; see the audit's Fix 3
  *   report for why that residual gap is out of this fix's scope.
  */
-export function markProvisionallyRecoverable(nonce: string): void {
-  updateSubmissionStatusStatement.run("RECOVERABLE", nonce);
+export async function markProvisionallyRecoverable(nonce: string): Promise<void> {
+  await pool.query("UPDATE payment_submissions SET status = $1 WHERE nonce = $2", ["RECOVERABLE", nonce]);
 }
 
 // ---------------------------------------------------------------------------
@@ -249,10 +232,37 @@ export type ReservePaymentResult =
  * Throws if no capability with `capabilityId` exists — a lookup miss is a
  * routing-layer concern (404, per docs/PROTOCOL.md §6), not one of the 9
  * invariant clauses.
+ *
+ * Locks BOTH the `capabilities` row (`SELECT ... FOR UPDATE`, guarding the
+ * REPLAY check below) and, via `reserveBudgetWithClient`, the `tasks` row
+ * (guarding the budget check) — in that fixed order, on one checked-out
+ * client, inside one transaction. Under the pre-migration better-sqlite3
+ * version, this atomicity came for free: the whole callback ran as one
+ * synchronous, non-yielding function call, so no other "concurrent"
+ * request's code could ever run in the middle of it. Postgres has no such
+ * guarantee on its own — `await`ing a query yields to the event loop, so
+ * without explicit row locks, two concurrent calls could each read the
+ * same pre-write state and both proceed. `FOR UPDATE` on each row
+ * restores the "exactly one winner" property the SAME way
+ * `reserveBudgetWithClient` restores it for the budget check alone (see
+ * that function's doc comment) — a second transaction's own
+ * `SELECT ... FOR UPDATE` on either row blocks until this one commits or
+ * rolls back. Covered for the budget row by property.test.ts's existing
+ * concurrent double-spend test (N distinct capabilities, one shared task
+ * budget); covered for the capability row by its new companion test (N
+ * concurrent pay() calls against the SAME capability_id).
  */
-const reservePaymentTransaction = db.transaction(
-  (capabilityId: CapabilityId, taskHash: Task["taskHash"], amount: Task["maxTotalSpend"]): ReservePaymentResult => {
-    const row = selectCapabilityStatement.get(capabilityId);
+export async function reservePayment(
+  capabilityId: CapabilityId,
+  taskHash: Task["taskHash"],
+  amount: Task["maxTotalSpend"],
+): Promise<ReservePaymentResult> {
+  return withTransaction(async (client) => {
+    const result = await client.query<CapabilityRow>(
+      "SELECT * FROM capabilities WHERE capability_id = $1 FOR UPDATE",
+      [capabilityId],
+    );
+    const row = result.rows[0];
     if (row === undefined) {
       throw new Error(`reservePayment: no capability with capabilityId "${capabilityId}"`);
     }
@@ -265,12 +275,12 @@ const reservePaymentTransaction = db.transaction(
       return { ok: false, reason: "STALE_NONCE" };
     }
 
-    const budgetReserved = tryReserveBudget(taskHash, amount);
+    const budgetReserved = await reserveBudgetWithClient(client, taskHash, amount);
     if (!budgetReserved) {
       return { ok: false, reason: "BUDGET_EXCEEDED" };
     }
 
-    markConsumedStatement.run(capabilityId);
+    await client.query("UPDATE capabilities SET consumed = 1 WHERE capability_id = $1", [capabilityId]);
 
     const capability = rowToCapability(row);
     const issuedFrom: IssuedPaymentState = issuedPaymentStateSchema.parse({
@@ -284,15 +294,7 @@ const reservePaymentTransaction = db.transaction(
     });
 
     return { ok: true, state };
-  },
-);
-
-export function reservePayment(
-  capabilityId: CapabilityId,
-  taskHash: Task["taskHash"],
-  amount: Task["maxTotalSpend"],
-): ReservePaymentResult {
-  return reservePaymentTransaction(capabilityId, taskHash, amount);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -315,7 +317,11 @@ export async function submitPayment(
   const signature = await signer(payload);
   const submittedAt = new Date().toISOString();
 
-  insertSubmissionStatement.run(reserved.capability.nonce, signature, submittedAt);
+  await pool.query("INSERT INTO payment_submissions (nonce, signature, submitted_at) VALUES ($1, $2, $3)", [
+    reserved.capability.nonce,
+    signature,
+    submittedAt,
+  ]);
 
   return submittedPaymentStateSchema.parse({
     status: "SUBMITTED",
@@ -348,12 +354,15 @@ export type SubmissionOutcome = "settled" | "failed" | "unknown";
  * attempt) and passes the real derived outcome in here. This function's
  * own transition logic is unchanged by that wiring.
  */
-export function resolveSubmission(
+export async function resolveSubmission(
   submitted: SubmittedPaymentState,
   outcome: SubmissionOutcome,
-): SettledPaymentState | FailedPaymentState | RecoverablePaymentState {
+): Promise<SettledPaymentState | FailedPaymentState | RecoverablePaymentState> {
   if (outcome === "settled") {
-    updateSubmissionStatusStatement.run("SETTLED", submitted.capability.nonce);
+    await pool.query("UPDATE payment_submissions SET status = $1 WHERE nonce = $2", [
+      "SETTLED",
+      submitted.capability.nonce,
+    ]);
     return settledPaymentStateSchema.parse({
       status: "SETTLED",
       capability: submitted.capability,
@@ -362,7 +371,10 @@ export function resolveSubmission(
   }
 
   if (outcome === "failed") {
-    updateSubmissionStatusStatement.run("FAILED", submitted.capability.nonce);
+    await pool.query("UPDATE payment_submissions SET status = $1 WHERE nonce = $2", [
+      "FAILED",
+      submitted.capability.nonce,
+    ]);
     return failedPaymentStateSchema.parse({
       status: "FAILED",
       capability: submitted.capability,
@@ -370,7 +382,10 @@ export function resolveSubmission(
     });
   }
 
-  updateSubmissionStatusStatement.run("RECOVERABLE", submitted.capability.nonce);
+  await pool.query("UPDATE payment_submissions SET status = $1 WHERE nonce = $2", [
+    "RECOVERABLE",
+    submitted.capability.nonce,
+  ]);
   return recoverablePaymentStateSchema.parse({
     status: "RECOVERABLE",
     capability: submitted.capability,

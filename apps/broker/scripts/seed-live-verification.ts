@@ -1,10 +1,9 @@
 /**
  * One-off dev/verification script — NOT production code, NOT part of the
  * broker's runtime. Seeds one resource-registry entry and one task budget
- * directly against whatever `broker.db` is on `config.dbPath` (default
- * "./broker.db"), so a live `POST /issue` + `POST /pay` run against a real
- * `pnpm --filter broker dev` server has something real to authorize
- * against.
+ * directly against whatever Postgres `DATABASE_URL` points at, so a live
+ * `POST /issue` + `POST /pay` run against a real `pnpm --filter broker dev`
+ * server has something real to authorize against.
  *
  * Why this exists: no production code path seeds the registry or creates
  * tasks (routes/issue.ts's own doc comment confirms `/issue` deliberately
@@ -14,17 +13,13 @@
  * Testnet settlement check) — it is not a substitute for task 6.1's real
  * end-to-end integration.
  *
- * IMPORTANT — working directory matters: registry.ts/budget.ts resolve
- * `config.dbPath` relative to the CURRENT WORKING DIRECTORY, not this
- * file's location. Run this from `apps/broker/` (or with `DB_PATH` set to
- * match) so it writes to the exact same `broker.db` the live server has
- * open — running it from the repo root would silently create/use a
- * different file.
+ * IMPORTANT: make sure `DATABASE_URL` names the exact same Postgres
+ * instance/database the live server has open.
  *
  * Idempotent: `resourceId` and the derived `taskHash` are both PRIMARY
  * KEYs in their tables; this script checks `getResourceById`/`getTask`
  * first and skips anything already seeded, so re-running it against an
- * already-seeded broker.db is a safe no-op rather than a thrown
+ * already-seeded database is a safe no-op rather than a thrown
  * UNIQUE-constraint error or a silent duplicate.
  *
  * Usage (from apps/broker/):
@@ -60,12 +55,12 @@ function requireEnv(name: string): string {
   return value;
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const recipient = requireEnv("HEDERA_TESTNET_ACCOUNT_ID");
   const taskHash = hashCanonical(LIVE_VERIFICATION_TASK_DEFINITION);
 
-  if (getResourceById(LIVE_VERIFICATION_RESOURCE_ID) === undefined) {
-    seedRegistry([
+  if ((await getResourceById(LIVE_VERIFICATION_RESOURCE_ID)) === undefined) {
+    await seedRegistry([
       { resourceId: LIVE_VERIFICATION_RESOURCE_ID, recipient, price: LIVE_VERIFICATION_PRICE },
     ]);
     console.log(
@@ -75,8 +70,8 @@ function main(): void {
     console.log(`Resource registry entry ${LIVE_VERIFICATION_RESOURCE_ID} already exists — skipping.`);
   }
 
-  if (getTask(taskHash) === undefined) {
-    createTask(taskHash, LIVE_VERIFICATION_PRICE);
+  if ((await getTask(taskHash)) === undefined) {
+    await createTask(taskHash, LIVE_VERIFICATION_PRICE);
     console.log(`Created task budget ${taskHash} (maxTotalSpend=${LIVE_VERIFICATION_PRICE})`);
   } else {
     console.log(`Task budget ${taskHash} already exists — skipping.`);
@@ -98,4 +93,4 @@ function main(): void {
   );
 }
 
-main();
+await main();

@@ -8,7 +8,8 @@ export type LedgerTransportKind = "hid" | "speculos";
 
 export interface Config {
   readonly port: number;
-  readonly dbPath: string;
+  /** Postgres connection string (e.g. Render's provisioned instance, or a local dev Postgres) — see .env.example. */
+  readonly databaseUrl: string;
   readonly nodeEnv: string;
   /**
    * Gates the real Ledger-backed signer (signer.ts's `ledgerSign`, task
@@ -107,9 +108,25 @@ function parseLedgerTransport(value: string | undefined): LedgerTransportKind {
   return "speculos";
 }
 
+/**
+ * Required, not defaulted: nothing in this service works without a real
+ * Postgres instance to talk to, so a missing DATABASE_URL should fail
+ * loudly and immediately at startup rather than surface later as a
+ * confusing connection error from deep inside some request handler.
+ */
+function requireDatabaseUrl(): string {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error(
+      "config: DATABASE_URL is required (a Postgres connection string, e.g. from Render) — see .env.example",
+    );
+  }
+  return url;
+}
+
 export const config: Config = {
   port: Number(process.env.PORT ?? 3000),
-  dbPath: process.env.DB_PATH ?? "./broker.db",
+  databaseUrl: requireDatabaseUrl(),
   nodeEnv: process.env.NODE_ENV ?? "development",
   ledgerSigningEnabled: process.env.LEDGER_SIGNING_ENABLED !== "false",
   ledgerKeyIndex: Number(process.env.LEDGER_KEY_INDEX ?? 0),
